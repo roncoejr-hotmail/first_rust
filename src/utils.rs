@@ -84,3 +84,29 @@ pub fn open_sqlite_db(the_db_file: &str) -> sqlite::Connection {
     //
     connection
 }
+
+//
+//
+//
+//
+//
+pub fn display_records(connection: &sqlite::Connection) {
+    //
+    //
+    //
+    //
+    let query = "SELECT * FROM records";
+    
+    //
+    //
+    //
+    //
+    connection.iterate(query, |pairs| {
+        for &(column, value) in pairs.iter() {
+            let value_str = value.unwrap_or("NULL");
+            print!("{} = {} | ", column, value_str);
+        }
+        println!();
+        true
+    }).unwrap();
+}

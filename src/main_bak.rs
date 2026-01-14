@@ -14,7 +14,6 @@ use std::env;
 // use utils::test_write;
 // use utils::process_inputs;
 use utils::process_connection;
-use utils::display_records;
 // use utils::open_sqlite_db;
 use dotenv::dotenv;
 
@@ -56,8 +55,6 @@ fn main() {
         match args[i].as_ref() {
             "--db-file" => {
                     println!("{}: {}", args[i], args[i+1]);
-                    my_connection = process_connection("--db-file", &args[i+1]);
-                    display_records(&my_connection);
                             },
             _ => {
                     // process_connection(args[i], args[i+1]),
