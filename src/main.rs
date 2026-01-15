@@ -32,6 +32,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let mut i: usize = 1;
     let mut my_connection: sqlite::Connection;
+    let mut table_name: Option<String> = None;
 
     //
     //
@@ -57,15 +58,19 @@ fn main() {
             "--db-file" => {
                     println!("{}: {}", args[i], args[i+1]);
                     my_connection = process_connection("--db-file", &args[i+1]);
-                    // Get table name from next argument, or use "records" as default
-                    let table_name = if i + 2 < args.len() { &args[i+2] } else { "records" };
-                    let records = get_records(&my_connection, table_name);
+                    // Use table name from --table parameter, or default to "records"
+                    let table = table_name.as_deref().unwrap_or("records");
+                    let records = get_records(&my_connection, table);
                     for row in &records {
                         for (column, value) in row {
                             print!("{} = {} | ", column, value);
                         }
                         println!();
                     }
+                            },
+            "--table" => {
+                    println!("{}: {}", args[i], args[i+1]);
+                    table_name = Some(args[i+1].clone());
                             },
             _ => {
                     // process_connection(args[i], args[i+1]),
