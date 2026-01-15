@@ -91,12 +91,12 @@ pub fn open_sqlite_db(the_db_file: &str) -> sqlite::Connection {
 //
 //
 //
-pub fn get_records(connection: &sqlite::Connection) -> Vec<HashMap<String, String>> {
+pub fn get_records(connection: &sqlite::Connection, table_name: &str) -> Vec<HashMap<String, String>> {
     //
     //
     //
     //
-    let query = "SELECT * FROM records";
+    let query = format!("SELECT * FROM {}", table_name);
     let mut rows = Vec::new();
     
     //

@@ -57,7 +57,9 @@ fn main() {
             "--db-file" => {
                     println!("{}: {}", args[i], args[i+1]);
                     my_connection = process_connection("--db-file", &args[i+1]);
-                    let records = get_records(&my_connection);
+                    // Get table name from next argument, or use "records" as default
+                    let table_name = if i + 2 < args.len() { &args[i+2] } else { "records" };
+                    let records = get_records(&my_connection, table_name);
                     for row in &records {
                         for (column, value) in row {
                             print!("{} = {} | ", column, value);
