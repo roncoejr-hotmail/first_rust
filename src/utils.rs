@@ -97,6 +97,7 @@ pub fn get_records(connection: &sqlite::Connection, table_name: &str) -> Vec<Has
     //
     //
     let query = format!("SELECT * FROM {}", table_name);
+    println!("Querying table: {}", table_name);
     let mut rows = Vec::new();
     
     //
