@@ -96,7 +96,7 @@ pub fn get_records(connection: &sqlite::Connection) -> Vec<HashMap<String, Strin
     //
     //
     //
-    let query = "SELECT * FROM records";
+    let query = "SELECT * FROM test_table";
     let mut rows = Vec::new();
     
     //
