@@ -49,6 +49,18 @@ fn main() {
         Err(e) => println!("{}", e),
     }
 
+    // First pass: collect table name if --table parameter is present
+    let mut j: usize = 1;
+    while j < args.len() {
+        if j < args.len() - 1 && args[j] == "--table" {
+            table_name = Some(args[j+1].clone());
+            println!("{}: {}", args[j], args[j+1]);
+            break;
+        }
+        j += 1;
+    }
+
+    // Second pass: process other arguments
     while i < args.len() {
         //
         //
@@ -69,8 +81,7 @@ fn main() {
                     }
                             },
             "--table" => {
-                    println!("{}: {}", args[i], args[i+1]);
-                    table_name = Some(args[i+1].clone());
+                    // Already processed in first pass, skip
                             },
             _ => {
                     // process_connection(args[i], args[i+1]),
