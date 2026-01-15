@@ -4,6 +4,7 @@
 //
 //
 use std::env;
+use std::collections::HashMap;
 
 
 //
@@ -90,23 +91,31 @@ pub fn open_sqlite_db(the_db_file: &str) -> sqlite::Connection {
 //
 //
 //
-pub fn display_records(connection: &sqlite::Connection) {
+pub fn get_records(connection: &sqlite::Connection) -> Vec<HashMap<String, String>> {
     //
     //
     //
     //
     let query = "SELECT * FROM records";
+    let mut rows = Vec::new();
     
     //
     //
     //
     //
     connection.iterate(query, |pairs| {
+        let mut row = HashMap::new();
         for &(column, value) in pairs.iter() {
-            let value_str = value.unwrap_or("NULL");
-            print!("{} = {} | ", column, value_str);
+            let value_str = value.unwrap_or("NULL").to_string();
+            row.insert(column.to_string(), value_str);
         }
-        println!();
+        rows.push(row);
         true
     }).unwrap();
+    
+    //
+    //
+    //
+    //
+    rows
 }
