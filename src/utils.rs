@@ -461,10 +461,21 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
             eprintln!("DEBUG: cost_price = {}, cost_price_str = '{}'", cost_price, cost_price_str);
         }
         
+        // Convert all String parameters to &str for proper serialization
+        let vin_str: &str = &vin;
+        let make_str: &str = &make;
+        let model_str: &str = &model;
+        let color_str: &str = &color;
+        let condition_str: &str = &condition;
+        let vehicle_type_str: &str = &vehicle_type;
+        let status_str: &str = &status;
+        let date_acquired_str: &str = &date_acquired;
+        let description_str: &str = &description;
+        
         client.execute(query, &[
-            &vin, &make, &model, &year, &color, &mileage,
-            &condition, &vehicle_type, &cost_price_str, &list_price_str,
-            &status, &date_acquired, &description
+            vin_str, make_str, model_str, &year, color_str, &mileage,
+            condition_str, vehicle_type_str, &cost_price_str, &list_price_str,
+            status_str, date_acquired_str, description_str
         ]).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}', cost_price='{}'): {}", vin, vehicle_type, cost_price_str, e))?;
         
         inserted += 1;
@@ -516,10 +527,21 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
             eprintln!("DEBUG: state = '{}', len = {}", state, state.len());
         }
         
+        // Convert all String parameters to &str for proper serialization
+        let first_name_str: &str = &first_name;
+        let last_name_str: &str = &last_name;
+        let email_str: &str = &email;
+        let phone_str: &str = &phone;
+        let address_str: &str = &address;
+        let city_str: &str = &city;
+        let state_str: &str = &state;
+        let zip_code_str: &str = &zip_code;
+        let date_of_birth_str: &str = &date_of_birth;
+        
         client.execute(query, &[
-            &first_name, &last_name, &email, &phone,
-            &address, &city, &state, &zip_code,
-            &date_of_birth, &credit_score
+            first_name_str, last_name_str, email_str, phone_str,
+            address_str, city_str, state_str, zip_code_str,
+            date_of_birth_str, &credit_score
         ]).map_err(|e| format!("Failed to insert customer (zip_code='{}', state='{}'): {}", zip_code, state, e))?;
         
         inserted += 1;
@@ -569,9 +591,17 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
             eprintln!("DEBUG: commission_rate = {}, commission_rate_str = '{}'", commission_rate, commission_rate_str);
         }
         
+        // Convert all String parameters to &str for proper serialization
+        let first_name_str: &str = &first_name;
+        let last_name_str: &str = &last_name;
+        let email_str: &str = &email;
+        let phone_str: &str = &phone;
+        let role_str: &str = &role;
+        let hire_date_str: &str = &hire_date;
+        
         client.execute(query, &[
-            &first_name, &last_name, &email, &phone,
-            &role, &hire_date, &commission_rate_str, &is_active
+            first_name_str, last_name_str, email_str, phone_str,
+            role_str, hire_date_str, &commission_rate_str, &is_active
         ]).map_err(|e| format!("Failed to insert employee (role='{}', commission_rate='{}'): {}", role, commission_rate_str, e))?;
         
         inserted += 1;
