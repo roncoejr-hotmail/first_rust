@@ -3,6 +3,8 @@
 //
 //
 mod utils;
+mod api;
+mod server;
 
 
 //
@@ -37,7 +39,8 @@ use dotenv::dotenv;
 //
 //
 //
-fn main() {
+#[tokio::main]
+async fn main() {
     //
     //
     //
@@ -92,6 +95,16 @@ fn main() {
         } else if args[j] == "--generate-sample-data" {
             generate_sample_data = true;
             println!("{}", args[j]);
+        } else if args[j] == "--serve" {
+            // Start API server
+            let db = db_name.clone().unwrap_or_else(|| "postgres".to_string());
+            let port: u16 = if j < args.len() - 1 {
+                args[j + 1].parse().unwrap_or(3000)
+            } else {
+                3000
+            };
+            server::run_server(db, port).await;
+            return;
         }
         j += 1;
     }
