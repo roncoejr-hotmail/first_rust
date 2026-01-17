@@ -401,19 +401,29 @@ pub fn generate_kpi_actuals(client: &mut Client) -> Result<usize, String> {
             let value_decimal = Decimal::from_str(&format!("{:.2}", actual_value))
                 .map_err(|e| format!("Failed to parse actual value: {}", e))?;
             
+            // Calculate period end (end of month)
+            let period_start = period_date.with_day(1).unwrap_or(period_date);
+            let next_month = if period_start.month() == 12 {
+                chrono::NaiveDate::from_ymd_opt(period_start.year() + 1, 1, 1)
+            } else {
+                chrono::NaiveDate::from_ymd_opt(period_start.year(), period_start.month() + 1, 1)
+            };
+            let period_end = next_month.unwrap_or(period_date) - Duration::days(1);
+            
             // Insert KPI actual
             client
                 .execute(
-                    "INSERT INTO kpi_actuals (kpi_id, period_date, actual_value, notes, created_date)
-                     VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)",
+                    "INSERT INTO kpi_actuals (kpi_id, period_start, period_end, actual_value, notes)
+                     VALUES ($1, $2, $3, $4, $5)",
                     &[
                         &kpi_id,
-                        &period_date,
+                        &period_start,
+                        &period_end,
                         &value_decimal,
                         &format!("Generated sample data for {}", kpi_name),
                     ],
                 )
-                .map_err(|e| format!("Failed to insert KPI actual: {}", e))?;
+                .map_err(|e| format!("Failed to insert KPI actual for {} on {:?}: {:?}", kpi_name, period_start, e))?;
             
             inserted += 1;
         }

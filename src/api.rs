@@ -2695,7 +2695,7 @@ async fn get_kpi_scorecard(
                 SELECT actual_value
                 FROM kpi_actuals
                 WHERE kpi_id = $1
-                ORDER BY period_date DESC
+                ORDER BY period_start DESC
                 LIMIT 1
             ", &[&kpi_id])
             .await {
@@ -2803,13 +2803,13 @@ async fn get_kpi_scorecard(
             SELECT 
                 ka.kpi_id,
                 kd.kpi_name,
-                TO_CHAR(ka.period_date, 'YYYY-MM') as period,
+                TO_CHAR(ka.period_start, 'YYYY-MM') as period,
                 kd.target_value,
                 ka.actual_value
             FROM kpi_actuals ka
             JOIN kpi_definitions kd ON ka.kpi_id = kd.kpi_id
-            WHERE ka.period_date >= CURRENT_DATE - INTERVAL '12 months'
-            ORDER BY ka.kpi_id, ka.period_date
+            WHERE ka.period_start >= CURRENT_DATE - INTERVAL '12 months'
+            ORDER BY ka.kpi_id, ka.period_start
         ", &[])
         .await {
             Ok(trend_rows) => {
