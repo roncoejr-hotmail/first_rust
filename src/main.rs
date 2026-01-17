@@ -39,8 +39,7 @@ use dotenv::dotenv;
 //
 //
 //
-#[tokio::main]
-async fn main() {
+fn main() {
     //
     //
     //
@@ -92,7 +91,12 @@ async fn main() {
             println!("🚀 Starting API server...");
             println!("📊 Database: {}", serve_db_name);
             println!("🔌 Port: {}", port);
-            server::run_server(serve_db_name, port).await;
+            
+            // Run the async server in a new tokio runtime
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            runtime.block_on(async {
+                server::run_server(serve_db_name, port).await;
+            });
             return;
         }
     }
