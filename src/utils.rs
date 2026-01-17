@@ -451,28 +451,21 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         let date_acquired: String = format!("{}-{:02}-{:02}", acquired_year, acquired_month, acquired_day);
         let description: String = format!("Vehicle description {}", Faker.fake::<String>());
         
+        // Convert DECIMAL values to strings for PostgreSQL
+        let cost_price_str = format!("{:.2}", cost_price);
+        let list_price_str = format!("{:.2}", list_price);
+        
         // Debug: print values to identify the issue
         if inserted == 0 {
             eprintln!("DEBUG: vehicle_type = '{}', len = {}", vehicle_type, vehicle_type.len());
-            eprintln!("DEBUG: cost_price = {}", cost_price);
+            eprintln!("DEBUG: cost_price = {}, cost_price_str = '{}'", cost_price, cost_price_str);
         }
         
-        // Store string slices to ensure proper lifetimes
-        let vin_slice = vin.as_str();
-        let make_slice = make.as_str();
-        let model_slice = model.as_str();
-        let color_slice = color.as_str();
-        let condition_slice = condition.as_str();
-        let vehicle_type_slice = vehicle_type.as_str();
-        let status_slice = status.as_str();
-        let date_acquired_slice = date_acquired.as_str();
-        let description_slice = description.as_str();
-        
         client.execute(query, &[
-            &vin_slice, &make_slice, &model_slice, &year, &color_slice, &mileage,
-            &condition_slice, &vehicle_type_slice, &cost_price, &list_price,
-            &status_slice, &date_acquired_slice, &description_slice
-        ]).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}'): {}", vin, vehicle_type, e))?;
+            &vin, &make, &model, &year, &color, &mileage,
+            &condition, &vehicle_type, &cost_price_str, &list_price_str,
+            &status, &date_acquired, &description
+        ]).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}', cost_price='{}'): {}", vin, vehicle_type, cost_price_str, e))?;
         
         inserted += 1;
     }
@@ -523,21 +516,10 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
             eprintln!("DEBUG: state = '{}', len = {}", state, state.len());
         }
         
-        // Store string slices to ensure proper lifetimes
-        let first_name_slice = first_name.as_str();
-        let last_name_slice = last_name.as_str();
-        let email_slice = email.as_str();
-        let phone_slice = phone.as_str();
-        let address_slice = address.as_str();
-        let city_slice = city.as_str();
-        let state_slice = state.as_str();
-        let zip_code_slice = zip_code.as_str();
-        let date_of_birth_slice = date_of_birth.as_str();
-        
         client.execute(query, &[
-            &first_name_slice, &last_name_slice, &email_slice, &phone_slice,
-            &address_slice, &city_slice, &state_slice, &zip_code_slice,
-            &date_of_birth_slice, &credit_score
+            &first_name, &last_name, &email, &phone,
+            &address, &city, &state, &zip_code,
+            &date_of_birth, &credit_score
         ]).map_err(|e| format!("Failed to insert customer (zip_code='{}', state='{}'): {}", zip_code, state, e))?;
         
         inserted += 1;
@@ -578,24 +560,19 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         };
         let is_active: bool = true;
         
+        // Convert DECIMAL value to string for PostgreSQL
+        let commission_rate_str = format!("{:.2}", commission_rate);
+        
         // Debug: print values to identify the issue
         if inserted == 0 {
             eprintln!("DEBUG: role = '{}', len = {}", role, role.len());
-            eprintln!("DEBUG: commission_rate = {}", commission_rate);
+            eprintln!("DEBUG: commission_rate = {}, commission_rate_str = '{}'", commission_rate, commission_rate_str);
         }
         
-        // Store string slices to ensure proper lifetimes
-        let first_name_slice = first_name.as_str();
-        let last_name_slice = last_name.as_str();
-        let email_slice = email.as_str();
-        let phone_slice = phone.as_str();
-        let role_slice = role.as_str();
-        let hire_date_slice = hire_date.as_str();
-        
         client.execute(query, &[
-            &first_name_slice, &last_name_slice, &email_slice, &phone_slice,
-            &role_slice, &hire_date_slice, &commission_rate, &is_active
-        ]).map_err(|e| format!("Failed to insert employee (role='{}'): {}", role, e))?;
+            &first_name, &last_name, &email, &phone,
+            &role, &hire_date, &commission_rate_str, &is_active
+        ]).map_err(|e| format!("Failed to insert employee (role='{}', commission_rate='{}'): {}", role, commission_rate_str, e))?;
         
         inserted += 1;
     }
