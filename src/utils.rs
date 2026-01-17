@@ -529,7 +529,7 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         let role_idx: usize = (0..roles.len()).fake::<usize>();
         let role: String = roles[role_idx].to_string();
         let hire_date: String = format!("{}-{:02}-{:02}", (2015..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
-        let commission_rate: f64 = match role {
+        let commission_rate: f64 = match role.as_str() {
             "Salesperson" => (2.0..5.0).fake::<f64>(),
             "Finance Manager" => (1.0..3.0).fake::<f64>(),
             _ => 0.0,
@@ -760,7 +760,7 @@ pub fn generate_sample_maintenance_history(client: &mut postgres::Client, count:
             let service_provider: String = service_providers[service_provider_idx].to_string();
             
             let mileage_at_service: i32 = (0..current_mileage).fake::<i32>();
-            let cost: f64 = match service_type.as_str() {
+            let cost: f64 = match &service_type[..] {
                 "Oil Change" => (25.0..75.0).fake::<f64>(),
                 "Tire Rotation" => (20.0..50.0).fake::<f64>(),
                 "Brake Service" => (150.0..500.0).fake::<f64>(),
