@@ -340,6 +340,62 @@ pub struct VehicleDetail {
     pub days_in_inventory: i32,
 }
 
+// Finance & Loan Management Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FinanceOverview {
+    pub total_loans: i64,
+    pub active_loans: i64,
+    pub total_loan_value: f64,
+    pub outstanding_balance: f64,
+    pub total_interest_revenue: f64,
+    pub average_interest_rate: f64,
+    pub payment_collection_rate: f64,
+    pub loans_by_status: Vec<LoanStatusStat>,
+    pub monthly_payment_trends: Vec<MonthlyPaymentTrend>,
+    pub top_loans_by_balance: Vec<LoanDetail>,
+    pub late_payment_analysis: LatePaymentStats,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoanStatusStat {
+    pub status: String,
+    pub count: i32,
+    pub total_value: f64,
+    pub percentage: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MonthlyPaymentTrend {
+    pub month: String,
+    pub total_payments: f64,
+    pub payment_count: i32,
+    pub principal_paid: f64,
+    pub interest_paid: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoanDetail {
+    pub loan_id: i32,
+    pub customer_name: String,
+    pub vehicle_info: String,
+    pub loan_amount: f64,
+    pub remaining_balance: f64,
+    pub interest_rate: f64,
+    pub monthly_payment: f64,
+    pub term_months: i32,
+    pub loan_status: String,
+    pub loan_start_date: String,
+    pub days_active: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LatePaymentStats {
+    pub total_late_payments: i32,
+    pub total_late_fees: f64,
+    pub loans_at_risk: i32,
+    pub average_days_late: f64,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -713,6 +769,241 @@ async fn get_inventory_overview(
     }))
 }
 
+// Handler for finance & loan management
+async fn get_finance_overview(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<FinanceOverview>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    // Get total loan counts and values
+    let loan_stats = client
+        .query_one("
+            SELECT 
+                COUNT(*) as total_loans,
+                SUM(CASE WHEN loan_status IN ('active', 'approved') THEN 1 ELSE 0 END) as active_loans,
+                COALESCE(SUM(loan_amount), 0) as total_loan_value,
+                COALESCE(SUM(CASE WHEN loan_status IN ('active', 'approved') THEN remaining_balance ELSE 0 END), 0) as outstanding_balance,
+                COALESCE(AVG(interest_rate), 0) as avg_interest_rate
+            FROM loans
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let total_loans: i64 = loan_stats.get(0);
+    let active_loans: i64 = loan_stats.get(1);
+    let loan_value_decimal: Decimal = loan_stats.get(2);
+    let total_loan_value: f64 = loan_value_decimal.to_string().parse().unwrap_or(0.0);
+    let outstanding_decimal: Decimal = loan_stats.get(3);
+    let outstanding_balance: f64 = outstanding_decimal.to_string().parse().unwrap_or(0.0);
+    let avg_rate_decimal: Decimal = loan_stats.get(4);
+    let average_interest_rate: f64 = avg_rate_decimal.to_string().parse().unwrap_or(0.0);
+    
+    // Calculate total interest revenue from all payments
+    let interest_row = client
+        .query_one("
+            SELECT COALESCE(SUM(interest_amount), 0) as total_interest
+            FROM payments
+            WHERE payment_status = 'processed'
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let interest_decimal: Decimal = interest_row.get(0);
+    let total_interest_revenue: f64 = interest_decimal.to_string().parse().unwrap_or(0.0);
+    
+    // Calculate payment collection rate
+    let collection_row = client
+        .query_one("
+            SELECT 
+                COUNT(*) as total_expected,
+                SUM(CASE WHEN payment_status = 'processed' THEN 1 ELSE 0 END) as processed
+            FROM payments
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let total_expected: i64 = collection_row.get(0);
+    let processed: i64 = collection_row.get(1);
+    let payment_collection_rate: f64 = if total_expected > 0 {
+        (processed as f64 / total_expected as f64) * 100.0
+    } else {
+        0.0
+    };
+    
+    // Get loans by status
+    let status_rows = client
+        .query("
+            SELECT 
+                loan_status,
+                COUNT(*) as count,
+                COALESCE(SUM(loan_amount), 0) as total_value,
+                (COUNT(*)::float / (SELECT COUNT(*) FROM loans)::float * 100) as percentage
+            FROM loans
+            GROUP BY loan_status
+            ORDER BY count DESC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut loans_by_status = Vec::new();
+    for row in status_rows {
+        let status: String = row.get(0);
+        let count: i64 = row.get(1);
+        let value_decimal: Decimal = row.get(2);
+        let total_value: f64 = value_decimal.to_string().parse().unwrap_or(0.0);
+        let percentage: f64 = row.get(3);
+        
+        loans_by_status.push(LoanStatusStat {
+            status,
+            count: count as i32,
+            total_value,
+            percentage,
+        });
+    }
+    
+    // Get monthly payment trends (last 6 months)
+    let payment_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(payment_date, 'YYYY-MM') as month,
+                COALESCE(SUM(payment_amount), 0) as total_payments,
+                COUNT(*) as payment_count,
+                COALESCE(SUM(principal_amount), 0) as principal_paid,
+                COALESCE(SUM(interest_amount), 0) as interest_paid
+            FROM payments
+            WHERE payment_status = 'processed'
+                AND payment_date >= CURRENT_DATE - INTERVAL '6 months'
+            GROUP BY TO_CHAR(payment_date, 'YYYY-MM')
+            ORDER BY month DESC
+            LIMIT 6
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut monthly_payment_trends = Vec::new();
+    for row in payment_rows {
+        let month: String = row.get(0);
+        let total_decimal: Decimal = row.get(1);
+        let total_payments: f64 = total_decimal.to_string().parse().unwrap_or(0.0);
+        let payment_count: i64 = row.get(2);
+        let principal_decimal: Decimal = row.get(3);
+        let principal_paid: f64 = principal_decimal.to_string().parse().unwrap_or(0.0);
+        let interest_decimal: Decimal = row.get(4);
+        let interest_paid: f64 = interest_decimal.to_string().parse().unwrap_or(0.0);
+        
+        monthly_payment_trends.push(MonthlyPaymentTrend {
+            month,
+            total_payments,
+            payment_count: payment_count as i32,
+            principal_paid,
+            interest_paid,
+        });
+    }
+    monthly_payment_trends.reverse();
+    
+    // Get top loans by remaining balance
+    let loan_rows = client
+        .query("
+            SELECT 
+                l.loan_id,
+                c.first_name || ' ' || c.last_name as customer_name,
+                v.year || ' ' || v.make || ' ' || v.model as vehicle_info,
+                l.loan_amount,
+                l.remaining_balance,
+                l.interest_rate,
+                l.monthly_payment,
+                l.term_months,
+                l.loan_status,
+                l.loan_start_date,
+                CURRENT_DATE - l.loan_start_date as days_active
+            FROM loans l
+            JOIN sales s ON l.sale_id = s.sale_id
+            JOIN customers c ON s.customer_id = c.customer_id
+            JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+            WHERE l.loan_status IN ('active', 'approved')
+            ORDER BY l.remaining_balance DESC
+            LIMIT 10
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut top_loans_by_balance = Vec::new();
+    for row in loan_rows {
+        let loan_id: i32 = row.get(0);
+        let customer_name: String = row.get(1);
+        let vehicle_info: String = row.get(2);
+        let amount_decimal: Decimal = row.get(3);
+        let loan_amount: f64 = amount_decimal.to_string().parse().unwrap_or(0.0);
+        let balance_decimal: Decimal = row.get(4);
+        let remaining_balance: f64 = balance_decimal.to_string().parse().unwrap_or(0.0);
+        let rate_decimal: Decimal = row.get(5);
+        let interest_rate: f64 = rate_decimal.to_string().parse().unwrap_or(0.0);
+        let payment_decimal: Decimal = row.get(6);
+        let monthly_payment: f64 = payment_decimal.to_string().parse().unwrap_or(0.0);
+        let term_months: i32 = row.get(7);
+        let loan_status: String = row.get(8);
+        let loan_start_date: chrono::NaiveDate = row.get(9);
+        let days_active: i32 = row.get(10);
+        
+        top_loans_by_balance.push(LoanDetail {
+            loan_id,
+            customer_name,
+            vehicle_info,
+            loan_amount,
+            remaining_balance,
+            interest_rate,
+            monthly_payment,
+            term_months,
+            loan_status,
+            loan_start_date: loan_start_date.to_string(),
+            days_active,
+        });
+    }
+    
+    // Get late payment analysis
+    let late_payment_row = client
+        .query_one("
+            SELECT 
+                COUNT(*) as total_late,
+                COALESCE(SUM(late_fee), 0) as total_fees,
+                COUNT(DISTINCT loan_id) as loans_at_risk,
+                0 as avg_days_late
+            FROM payments
+            WHERE late_fee > 0
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let total_late_payments: i64 = late_payment_row.get(0);
+    let fees_decimal: Decimal = late_payment_row.get(1);
+    let total_late_fees: f64 = fees_decimal.to_string().parse().unwrap_or(0.0);
+    let loans_at_risk: i64 = late_payment_row.get(2);
+    let average_days_late: f64 = 0.0; // Placeholder since we don't track days late in schema
+    
+    let late_payment_analysis = LatePaymentStats {
+        total_late_payments: total_late_payments as i32,
+        total_late_fees,
+        loans_at_risk: loans_at_risk as i32,
+        average_days_late,
+    };
+    
+    Ok(Json(FinanceOverview {
+        total_loans,
+        active_loans,
+        total_loan_value,
+        outstanding_balance,
+        total_interest_revenue,
+        average_interest_rate,
+        payment_collection_rate,
+        loans_by_status,
+        monthly_payment_trends,
+        top_loans_by_balance,
+        late_payment_analysis,
+    }))
+}
+
 // Health check endpoint
 async fn health_check() -> &'static str {
     "OK"
@@ -727,5 +1018,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/api/dashboard/executive", get(get_executive_overview))
         .route("/api/dashboard/sales-performance", get(get_sales_performance))
         .route("/api/dashboard/inventory", get(get_inventory_overview))
+        .route("/api/dashboard/finance", get(get_finance_overview))
         .with_state(state)
 }
