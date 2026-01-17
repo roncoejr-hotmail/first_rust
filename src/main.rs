@@ -54,6 +54,7 @@ fn main() {
     let mut do_populate: bool = false;
     let mut create_schema: bool = false;
     let mut generate_sample_data: bool = false;
+    let mut generate_fpa_data: bool = false;
 
     //
     //
@@ -126,6 +127,9 @@ fn main() {
             println!("{}", args[j]);
         } else if args[j] == "--generate-sample-data" {
             generate_sample_data = true;
+            println!("{}", args[j]);
+        } else if args[j] == "--generate-fpa-data" {
+            generate_fpa_data = true;
             println!("{}", args[j]);
         }
         j += 1;
@@ -222,8 +226,8 @@ fn main() {
                     2
                             },
             "--db-pgsql" => {
-                    // Only process if not creating schema or generating sample data
-                    if !create_schema && !generate_sample_data {
+                    // Only process if not creating schema or generating data
+                    if !create_schema && !generate_sample_data && !generate_fpa_data {
                         // Process PostgreSQL connection
                         let db = db_name.as_deref().expect("--db-name parameter is required with --db-pgsql");
                         let mut pg_client = open_postgres_db(db);
