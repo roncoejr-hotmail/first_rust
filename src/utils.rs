@@ -783,29 +783,15 @@ pub fn generate_sample_payments(client: &mut postgres::Client, months_back: i32)
     
     for row in loan_rows {
         let loan_id: i32 = row.get(0);
-        let monthly_payment: f64 = row.get::<_, f32>(1) as f64;
-        let loan_start_date: String = row.get(2);
-        let remaining_balance: f64 = row.get::<_, f32>(3) as f64;
-        
-        // Parse start date
-        let date_parts: Vec<&str> = loan_start_date.split('-').collect();
-        if date_parts.len() != 3 {
-            continue;
-        }
-        let start_year: i32 = date_parts[0].parse().unwrap_or(2023);
-        let start_month: i32 = date_parts[1].parse().unwrap_or(1);
+        let monthly_payment_decimal: Decimal = row.get(1);
+        let monthly_payment: f64 = monthly_payment_decimal.to_string().parse().unwrap();
+        let loan_start_date: NaiveDate = row.get(2);
+        let remaining_balance_decimal: Decimal = row.get(3);
+        let mut remaining_balance: f64 = remaining_balance_decimal.to_string().parse().unwrap();
         
         // Generate payments for the last N months
         for month_offset in 0..months_back {
-            let mut year = start_year;
-            let mut month = start_month + month_offset;
-            
-            while month > 12 {
-                month -= 12;
-                year += 1;
-            }
-            
-            let payment_date = format!("{}-{:02}-{:02}", year, month, 15);
+            let payment_date = loan_start_date + chrono::Duration::days((month_offset * 30) as i64);
             
             // Simple interest calculation (simplified)
             let interest_amount = remaining_balance * 0.005;
@@ -815,12 +801,19 @@ pub fn generate_sample_payments(client: &mut postgres::Client, months_back: i32)
             let payment_method: String = payment_methods[payment_method_idx].to_string();
             let payment_status: String = "processed".to_string();
             
+            let monthly_payment_decimal = Decimal::from_str(&format!("{:.2}", monthly_payment)).unwrap();
+            let principal_amount_decimal = Decimal::from_str(&format!("{:.2}", principal_amount)).unwrap();
+            let interest_amount_decimal = Decimal::from_str(&format!("{:.2}", interest_amount)).unwrap();
+            let payment_method_str: &str = &payment_method;
+            let payment_status_str: &str = &payment_status;
+            
             client.execute(query, &[
-                &loan_id, &payment_date, &monthly_payment, &payment_method, &payment_status,
-                &principal_amount, &interest_amount
+                &loan_id, &payment_date, &monthly_payment_decimal, &payment_method_str, &payment_status_str,
+                &principal_amount_decimal, &interest_amount_decimal
             ]).map_err(|e| format!("Failed to insert payment: {}", e))?;
             
             inserted += 1;
+            remaining_balance -= principal_amount;
         }
     }
     
