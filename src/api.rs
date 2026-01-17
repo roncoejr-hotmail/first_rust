@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{State, Query},
     http::StatusCode,
     response::Json,
     routing::get,
@@ -14,6 +14,30 @@ use rust_decimal::Decimal;
 #[derive(Clone)]
 pub struct AppState {
     pub db_name: String,
+}
+
+// Filter parameters
+#[derive(Debug, Deserialize)]
+pub struct DateRangeFilter {
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SalesFilters {
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub vehicle_type: Option<String>,
+    pub employee_id: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InventoryFilters {
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub vehicle_type: Option<String>,
+    pub status: Option<String>,
+    pub search: Option<String>,
 }
 
 // Executive Overview Response
@@ -86,22 +110,39 @@ async fn get_db_client(db_name: &str) -> Result<tokio_postgres::Client, String> 
 // Handler for executive overview
 async fn get_executive_overview(
     State(state): State<Arc<AppState>>,
+    Query(filters): Query<DateRangeFilter>,
 ) -> Result<Json<ExecutiveOverview>, (StatusCode, String)> {
     let client = get_db_client(&state.db_name)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
+    // Build date filter SQL
+    let date_filter = if filters.start_date.is_some() || filters.end_date.is_some() {
+        let mut conditions = Vec::new();
+        if let Some(start) = &filters.start_date {
+            conditions.push(format!("sale_date >= '{}'", start));
+        }
+        if let Some(end) = &filters.end_date {
+            conditions.push(format!("sale_date <= '{}'", end));
+        }
+        format!("WHERE {}", conditions.join(" AND "))
+    } else {
+        String::new()
+    };
+    
     // Get total revenue
+    let revenue_query = format!("SELECT COALESCE(SUM(sale_price), 0) as total FROM sales {}", date_filter);
     let revenue_row = client
-        .query_one("SELECT COALESCE(SUM(sale_price), 0) as total FROM sales", &[])
+        .query_one(&revenue_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     let total_revenue: Decimal = revenue_row.get(0);
     let total_revenue: f64 = total_revenue.to_string().parse().unwrap_or(0.0);
     
     // Get total sales count
+    let sales_query = format!("SELECT COUNT(*) as count FROM sales {}", date_filter);
     let sales_row = client
-        .query_one("SELECT COUNT(*) as count FROM sales", &[])
+        .query_one(&sales_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     let total_sales: i64 = sales_row.get(0);
@@ -138,25 +179,28 @@ async fn get_executive_overview(
     let loan_portfolio_value: f64 = loan_portfolio_value_decimal.to_string().parse().unwrap_or(0.0);
     
     // Get average sale price
+    let avg_query = format!("SELECT COALESCE(AVG(sale_price), 0) as avg FROM sales {}", date_filter);
     let avg_row = client
-        .query_one("SELECT COALESCE(AVG(sale_price), 0) as avg FROM sales", &[])
+        .query_one(&avg_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     let average_sale_price_decimal: Decimal = avg_row.get(0);
     let average_sale_price: f64 = average_sale_price_decimal.to_string().parse().unwrap_or(0.0);
     
     // Get revenue by month
+    let monthly_query = format!("
+        SELECT 
+            TO_CHAR(sale_date, 'YYYY-MM') as month,
+            SUM(sale_price) as revenue,
+            COUNT(*) as count
+        FROM sales
+        {}
+        GROUP BY TO_CHAR(sale_date, 'YYYY-MM')
+        ORDER BY month DESC
+        LIMIT 12
+    ", date_filter);
     let monthly_rows = client
-        .query("
-            SELECT 
-                TO_CHAR(sale_date, 'YYYY-MM') as month,
-                SUM(sale_price) as revenue,
-                COUNT(*) as count
-            FROM sales
-            GROUP BY TO_CHAR(sale_date, 'YYYY-MM')
-            ORDER BY month DESC
-            LIMIT 12
-        ", &[])
+        .query(&monthly_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     
@@ -175,16 +219,18 @@ async fn get_executive_overview(
     revenue_by_month.reverse();
     
     // Get sales by payment method
+    let payment_query = format!("
+        SELECT 
+            payment_method,
+            COUNT(*) as count,
+            SUM(sale_price) as total
+        FROM sales
+        {}
+        GROUP BY payment_method
+        ORDER BY count DESC
+    ", date_filter);
     let payment_rows = client
-        .query("
-            SELECT 
-                payment_method,
-                COUNT(*) as count,
-                SUM(sale_price) as total
-            FROM sales
-            GROUP BY payment_method
-            ORDER BY count DESC
-        ", &[])
+        .query(&payment_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     
@@ -202,18 +248,20 @@ async fn get_executive_overview(
     }
     
     // Get top selling vehicle types
+    let types_query = format!("
+        SELECT 
+            v.vehicle_type,
+            COUNT(*) as count,
+            SUM(s.sale_price) as revenue
+        FROM sales s
+        JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+        {}
+        GROUP BY v.vehicle_type
+        ORDER BY count DESC
+        LIMIT 5
+    ", date_filter);
     let types_rows = client
-        .query("
-            SELECT 
-                v.vehicle_type,
-                COUNT(*) as count,
-                SUM(s.sale_price) as revenue
-            FROM sales s
-            JOIN vehicles v ON s.vehicle_id = v.vehicle_id
-            GROUP BY v.vehicle_type
-            ORDER BY count DESC
-            LIMIT 5
-        ", &[])
+        .query(&types_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     
@@ -643,20 +691,58 @@ pub struct CashFlowAnalysis {
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
+    Query(filters): Query<SalesFilters>,
 ) -> Result<Json<SalesPerformance>, (StatusCode, String)> {
     let client = get_db_client(&state.db_name)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
-    // Get overall metrics
-    let metrics_row = client
-        .query_one("
+    // Build filter SQL
+    let mut conditions = Vec::new();
+    if let Some(start) = &filters.start_date {
+        conditions.push(format!("s.sale_date >= '{}'", start));
+    }
+    if let Some(end) = &filters.end_date {
+        conditions.push(format!("s.sale_date <= '{}'", end));
+    }
+    if let Some(vtype) = &filters.vehicle_type {
+        conditions.push(format!("v.vehicle_type = '{}'", vtype));
+    }
+    if let Some(emp_id) = filters.employee_id {
+        if emp_id > 0 {
+            conditions.push(format!("s.salesperson_id = {}", emp_id));
+        }
+    }
+    let date_filter = if !conditions.is_empty() {
+        format!("WHERE {}", conditions.join(" AND "))
+    } else {
+        String::new()
+    };
+    
+    // Get overall metrics (need to adjust for JOIN if filtering by vehicle type)
+    let metrics_query = if filters.vehicle_type.is_some() {
+        format!("
+            SELECT 
+                COUNT(*) as total_sales,
+                COALESCE(SUM(s.sale_price), 0) as total_revenue,
+                COALESCE(AVG(s.sale_price), 0) as avg_deal_size
+            FROM sales s
+            JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+            {}
+        ", date_filter)
+    } else {
+        let simple_filter = date_filter.replace("s.sale_date", "sale_date");
+        format!("
             SELECT 
                 COUNT(*) as total_sales,
                 COALESCE(SUM(sale_price), 0) as total_revenue,
                 COALESCE(AVG(sale_price), 0) as avg_deal_size
             FROM sales
-        ", &[])
+            {}
+        ", simple_filter)
+    };
+    let metrics_row = client
+        .query_one(&metrics_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     
@@ -666,13 +752,25 @@ async fn get_sales_performance(
     let avg_deal_size_decimal: Decimal = metrics_row.get(2);
     let average_deal_size: f64 = avg_deal_size_decimal.to_string().parse().unwrap_or(0.0);
     
-    // Get total commission paid (from employees table - sum of commission_rate * sales)
-    let commission_row = client
-        .query_one("
+    // Get total commission paid
+    let commission_query = if filters.vehicle_type.is_some() {
+        format!("
             SELECT COALESCE(SUM(s.sale_price * (e.commission_rate / 100)), 0) as total_commission
             FROM sales s
             JOIN employees e ON s.salesperson_id = e.employee_id
-        ", &[])
+            JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+            {}
+        ", date_filter)
+    } else {
+        format!("
+            SELECT COALESCE(SUM(s.sale_price * (e.commission_rate / 100)), 0) as total_commission
+            FROM sales s
+            JOIN employees e ON s.salesperson_id = e.employee_id
+            {}
+        ", date_filter)
+    };
+    let commission_row = client
+        .query_one(&commission_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     
@@ -680,8 +778,18 @@ async fn get_sales_performance(
     let total_commission_paid: f64 = total_commission_decimal.to_string().parse().unwrap_or(0.0);
     
     // Get top performers (salespeople)
-    let performers_rows = client
-        .query("
+    let performers_query = if filters.vehicle_type.is_some() {
+        let additional_conds = conditions.iter()
+            .filter(|c| !c.contains("salesperson_id"))  // Keep other filters except employee_id for this query
+            .map(|c| c.as_str())
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let where_clause = if !additional_conds.is_empty() {
+            format!("WHERE e.role IN ('Salesperson', 'Sales Manager') AND {}", additional_conds)
+        } else {
+            "WHERE e.role IN ('Salesperson', 'Sales Manager')".to_string()
+        };
+        format!("
             SELECT 
                 e.employee_id,
                 e.first_name || ' ' || e.last_name as name,
@@ -692,11 +800,42 @@ async fn get_sales_performance(
                 COALESCE(AVG(s.sale_price), 0) as avg_sale_price
             FROM employees e
             LEFT JOIN sales s ON e.employee_id = s.salesperson_id
-            WHERE e.role IN ('Salesperson', 'Sales Manager')
+            LEFT JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+            {}
             GROUP BY e.employee_id, e.first_name, e.last_name, e.role
             ORDER BY total_revenue DESC
             LIMIT 10
-        ", &[])
+        ", where_clause)
+    } else {
+        let additional_conds = conditions.iter()
+            .filter(|c| !c.contains("salesperson_id"))
+            .map(|c| c.as_str())
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let where_clause = if !additional_conds.is_empty() {
+            format!("WHERE e.role IN ('Salesperson', 'Sales Manager') AND {}", additional_conds)
+        } else {
+            "WHERE e.role IN ('Salesperson', 'Sales Manager')".to_string()
+        };
+        format!("
+            SELECT 
+                e.employee_id,
+                e.first_name || ' ' || e.last_name as name,
+                e.role,
+                COUNT(s.sale_id) as total_sales,
+                COALESCE(SUM(s.sale_price), 0) as total_revenue,
+                COALESCE(SUM(s.sale_price * (e.commission_rate / 100)), 0) as commission_earned,
+                COALESCE(AVG(s.sale_price), 0) as avg_sale_price
+            FROM employees e
+            LEFT JOIN sales s ON e.employee_id = s.salesperson_id
+            {}
+            GROUP BY e.employee_id, e.first_name, e.last_name, e.role
+            ORDER BY total_revenue DESC
+            LIMIT 10
+        ", where_clause)
+    };
+    let performers_rows = client
+        .query(&performers_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     
@@ -837,21 +976,49 @@ async fn get_sales_performance(
 // Handler for inventory management
 async fn get_inventory_overview(
     State(state): State<Arc<AppState>>,
+    Query(filters): Query<InventoryFilters>,
 ) -> Result<Json<InventoryOverview>, (StatusCode, String)> {
     let client = get_db_client(&state.db_name)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
+    // Build filter SQL
+    let mut conditions = Vec::new();
+    if let Some(start) = &filters.start_date {
+        conditions.push(format!("date_acquired >= '{}'", start));
+    }
+    if let Some(end) = &filters.end_date {
+        conditions.push(format!("date_acquired <= '{}'", end));
+    }
+    if let Some(vtype) = &filters.vehicle_type {
+        conditions.push(format!("vehicle_type = '{}'", vtype));
+    }
+    if let Some(status) = &filters.status {
+        conditions.push(format!("status = '{}'", status.to_lowercase()));
+    }
+    if let Some(search) = &filters.search {
+        if !search.is_empty() {
+            conditions.push(format!("(vin ILIKE '%{}%' OR make ILIKE '%{}%' OR model ILIKE '%{}%')", search, search, search));
+        }
+    }
+    let vehicle_filter = if !conditions.is_empty() {
+        format!("WHERE {}", conditions.join(" AND "))
+    } else {
+        String::new()
+    };
+    
     // Get total vehicle counts
+    let counts_query = format!("
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) as available,
+            SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) as sold,
+            COALESCE(SUM(CASE WHEN status = 'available' THEN cost_price ELSE 0 END), 0) as inventory_value
+        FROM vehicles
+        {}
+    ", vehicle_filter);
     let counts_row = client
-        .query_one("
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) as available,
-                SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) as sold,
-                COALESCE(SUM(CASE WHEN status = 'available' THEN cost_price ELSE 0 END), 0) as inventory_value
-            FROM vehicles
-        ", &[])
+        .query_one(&counts_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     
@@ -876,18 +1043,20 @@ async fn get_inventory_overview(
     let average_days_in_inventory: f64 = days_decimal.to_string().parse().unwrap_or(0.0);
     
     // Get vehicles by type
+    let type_query = format!("
+        SELECT 
+            vehicle_type,
+            SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) as available,
+            SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) as sold,
+            COUNT(*) as total,
+            COALESCE(SUM(CASE WHEN status = 'available' THEN cost_price ELSE 0 END), 0) as total_value
+        FROM vehicles
+        {}
+        GROUP BY vehicle_type
+        ORDER BY total DESC
+    ", vehicle_filter);
     let type_rows = client
-        .query("
-            SELECT 
-                vehicle_type,
-                SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) as available,
-                SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) as sold,
-                COUNT(*) as total,
-                COALESCE(SUM(CASE WHEN status = 'available' THEN cost_price ELSE 0 END), 0) as total_value
-            FROM vehicles
-            GROUP BY vehicle_type
-            ORDER BY total DESC
-        ", &[])
+        .query(&type_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     

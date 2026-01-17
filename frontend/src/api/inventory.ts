@@ -43,8 +43,31 @@ export interface VehicleDetail {
 
 const API_BASE_URL = 'http://localhost:3000';
 
-export async function fetchInventoryOverview(): Promise<InventoryOverview> {
-  const response = await fetch(`${API_BASE_URL}/api/dashboard/inventory`);
+export interface InventoryFilterParams {
+  start_date?: string;
+  end_date?: string;
+  vehicle_type?: string;
+  status?: string;
+  search?: string;
+}
+
+export async function fetchInventoryOverview(params?: InventoryFilterParams): Promise<InventoryOverview> {
+  let url = `${API_BASE_URL}/api/dashboard/inventory`;
+  
+  if (params) {
+    const queryParams = new URLSearchParams();
+    if (params.start_date) queryParams.append('start_date', params.start_date);
+    if (params.end_date) queryParams.append('end_date', params.end_date);
+    if (params.vehicle_type) queryParams.append('vehicle_type', params.vehicle_type);
+    if (params.status) queryParams.append('status', params.status);
+    if (params.search) queryParams.append('search', params.search);
+    
+    if (queryParams.toString()) {
+      url += `?${queryParams.toString()}`;
+    }
+  }
+  
+  const response = await fetch(`${url}`);
   
   if (!response.ok) {
     throw new Error(`Failed to fetch inventory overview: ${response.statusText}`);

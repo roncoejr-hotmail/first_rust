@@ -34,8 +34,25 @@ export interface ExecutiveOverview {
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-export async function fetchExecutiveOverview(): Promise<ExecutiveOverview> {
-  const response = await fetch(`${API_BASE_URL}/api/dashboard/executive`);
+export interface DateRangeParams {
+  start_date?: string;
+  end_date?: string;
+}
+
+export async function fetchExecutiveOverview(params?: DateRangeParams): Promise<ExecutiveOverview> {
+  let url = `${API_BASE_URL}/api/dashboard/executive`;
+  
+  if (params) {
+    const queryParams = new URLSearchParams();
+    if (params.start_date) queryParams.append('start_date', params.start_date);
+    if (params.end_date) queryParams.append('end_date', params.end_date);
+    
+    if (queryParams.toString()) {
+      url += `?${queryParams.toString()}`;
+    }
+  }
+  
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch data: ${response.statusText}`);
   }

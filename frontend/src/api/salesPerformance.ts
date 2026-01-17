@@ -43,8 +43,29 @@ export interface SalesPerformance {
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-export async function fetchSalesPerformance(): Promise<SalesPerformance> {
-  const response = await fetch(`${API_BASE_URL}/api/dashboard/sales-performance`);
+export interface SalesFilterParams {
+  start_date?: string;
+  end_date?: string;
+  vehicle_type?: string;
+  employee_id?: number;
+}
+
+export async function fetchSalesPerformance(params?: SalesFilterParams): Promise<SalesPerformance> {
+  let url = `${API_BASE_URL}/api/dashboard/sales-performance`;
+  
+  if (params) {
+    const queryParams = new URLSearchParams();
+    if (params.start_date) queryParams.append('start_date', params.start_date);
+    if (params.end_date) queryParams.append('end_date', params.end_date);
+    if (params.vehicle_type) queryParams.append('vehicle_type', params.vehicle_type);
+    if (params.employee_id && params.employee_id > 0) queryParams.append('employee_id', params.employee_id.toString());
+    
+    if (queryParams.toString()) {
+      url += `?${queryParams.toString()}`;
+    }
+  }
+  
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch data: ${response.statusText}`);
   }

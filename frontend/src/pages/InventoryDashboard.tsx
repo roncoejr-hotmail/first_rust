@@ -13,6 +13,8 @@ import KPICard from '../components/KPICard';
 import InventoryByTypeChart from '../components/InventoryByTypeChart';
 import MarkupAnalysisChart from '../components/MarkupAnalysisChart';
 import VehicleInventoryTable from '../components/VehicleInventoryTable';
+import DateRangePicker from '../components/DateRangePicker';
+import FilterPanel from '../components/FilterPanel';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
@@ -23,23 +25,43 @@ export default function InventoryDashboard() {
   const [data, setData] = useState<InventoryOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Filter states
+  const getDefaultEndDate = () => new Date().toISOString().split('T')[0];
+  const getDefaultStartDate = () => {
+    const date = new Date();
+    date.setFullYear(date.getFullYear() - 1);
+    return date.toISOString().split('T')[0];
+  };
+  
+  const [startDate, setStartDate] = useState(getDefaultStartDate());
+  const [endDate, setEndDate] = useState(getDefaultEndDate());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedVehicleTypes, setSelectedVehicleTypes] = useState<string[]>([]);
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const result = await fetchInventoryOverview({
+        start_date: startDate,
+        end_date: endDate,
+        vehicle_type: selectedVehicleTypes.length === 1 ? selectedVehicleTypes[0] : undefined,
+        status: selectedStatuses.length === 1 ? selectedStatuses[0] : undefined,
+        search: searchQuery || undefined,
+      });
+      setData(result);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        setLoading(true);
-        const result = await fetchInventoryOverview();
-        setData(result);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load data');
-      } finally {
-        setLoading(false);
-      }
-    }
-
     loadData();
-  }, []);
+  }, [startDate, endDate, searchQuery, selectedVehicleTypes, selectedStatuses]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -78,6 +100,14 @@ export default function InventoryDashboard() {
     ? ((data.available_vehicles / data.total_vehicles) * 100).toFixed(1)
     : '0';
 
+  const handleDateChange = (newStartDate: string, newEndDate: string) => {
+    setStartDate(newStartDate);
+    setEndDate(newEndDate);
+  };
+
+  const vehicleTypes = ['Sedan', 'SUV', 'Truck', 'Coupe', 'Hatchback'];
+  const statuses = ['Available', 'Sold'];
+
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom fontWeight="bold" color="primary">
@@ -86,6 +116,27 @@ export default function InventoryDashboard() {
       <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
         Real-time vehicle inventory tracking and analysis
       </Typography>
+
+      {/* Date Range Filter */}
+      <Paper sx={{ p: 2, mb: 3, backgroundColor: '#f5f5f5' }}>
+        <DateRangePicker 
+          startDate={startDate} 
+          endDate={endDate} 
+          onDateChange={handleDateChange} 
+        />
+      </Paper>
+
+      {/* Advanced Filters */}
+      <FilterPanel
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        vehicleTypes={vehicleTypes}
+        selectedVehicleTypes={selectedVehicleTypes}
+        onVehicleTypeChange={setSelectedVehicleTypes}
+        statuses={statuses}
+        selectedStatuses={selectedStatuses}
+        onStatusChange={setSelectedStatuses}
+      />
 
       {/* KPI Cards */}
       <Box

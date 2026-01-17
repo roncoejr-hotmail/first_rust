@@ -15,6 +15,7 @@ import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import KPICard from '../components/KPICard';
 import RevenueChart from '../components/RevenueChart';
 import PaymentMethodChart from '../components/PaymentMethodChart';
+import DateRangePicker from '../components/DateRangePicker';
 import { fetchExecutiveOverview } from '../api/dashboard';
 import type { ExecutiveOverview } from '../api/dashboard';
 
@@ -22,26 +23,34 @@ export default function ExecutiveDashboard() {
   const [data, setData] = useState<ExecutiveOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Set default date range to last 30 days
+  const getDefaultEndDate = () => new Date().toISOString().split('T')[0];
+  const getDefaultStartDate = () => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30);
+    return date.toISOString().split('T')[0];
+  };
+  
+  const [startDate, setStartDate] = useState(getDefaultStartDate());
+  const [endDate, setEndDate] = useState(getDefaultEndDate());
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const overview = await fetchExecutiveOverview({ start_date: startDate, end_date: endDate });
+      setData(overview);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        setLoading(true);
-        setError(null);
-        const overview = await fetchExecutiveOverview();
-        setData(overview);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load data');
-      } finally {
-        setLoading(false);
-      }
-    }
-
     loadData();
-    // Refresh every 30 seconds
-    const interval = setInterval(loadData, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  }, [startDate, endDate]);
 
   if (loading) {
     return (
@@ -70,11 +79,25 @@ export default function ExecutiveDashboard() {
     }).format(value);
   };
 
+  const handleDateChange = (newStartDate: string, newEndDate: string) => {
+    setStartDate(newStartDate);
+    setEndDate(newEndDate);
+  };
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', mb: 3 }}>
         Executive Dashboard
       </Typography>
+
+      {/* Date Range Filter */}
+      <Paper sx={{ p: 2, mb: 3, backgroundColor: '#f5f5f5' }}>
+        <DateRangePicker 
+          startDate={startDate} 
+          endDate={endDate} 
+          onDateChange={handleDateChange} 
+        />
+      </Paper>
 
       {/* KPI Cards */}
       <Box sx={{ display: 'flex', gap: 3, mb: 3, flexWrap: 'wrap' }}>
