@@ -5,6 +5,7 @@
 mod utils;
 mod api;
 mod server;
+mod fpa_data_generation;
 
 
 //
@@ -186,6 +187,17 @@ fn main() {
                     }
                     1
                             },
+            "--generate-fpa-data" => {
+                    let db = db_name.as_deref().expect("--db-name parameter is required with --generate-fpa-data");
+                    let mut pg_client = open_postgres_db(db);
+                    
+                    println!("\n=== Generating FP&A Sample Data ===");
+                    match fpa_data_generation::generate_all_fpa_data(&mut pg_client, 2023) {
+                        Ok(_) => println!("\n✓ FP&A data generation complete!"),
+                        Err(e) => eprintln!("✗ Error generating FP&A data: {}", e),
+                    }
+                    1
+                            },
             "--db-file" => {
                     println!("{}: {}", args[i], args[i+1]);
                     my_connection = process_connection("--db-file", &args[i+1]);
@@ -257,6 +269,10 @@ fn main() {
                     1
                             },
             "--generate-sample-data" => {
+                    // Already processed in main match arm above, skip
+                    1
+                            },
+            "--generate-fpa-data" => {
                     // Already processed in main match arm above, skip
                     1
                             },

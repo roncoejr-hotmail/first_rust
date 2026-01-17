@@ -1,0 +1,353 @@
+// FP&A Data Generation Functions
+// Generates realistic financial planning and analysis sample data
+
+use postgres::Client;
+use fake::{Fake, Faker};
+use fake::faker::company::en::CompanyName;
+use rust_decimal::Decimal;
+use std::str::FromStr;
+use chrono::{NaiveDate, Datelike};
+
+/// Generate cost centers
+pub fn generate_cost_centers(client: &mut Client, count: usize) -> Result<usize, String> {
+    let mut inserted = 0;
+    
+    let departments = vec!["Sales", "Finance", "Marketing", "Operations", "IT", "HR"];
+    let cost_center_types = vec!["Showroom", "Service", "Parts", "Admin", "Corporate"];
+    
+    // Get some employee IDs to assign as managers
+    let manager_ids: Vec<i32> = client
+        .query("SELECT employee_id FROM employees WHERE role IN ('Sales Manager', 'General Manager') LIMIT 20", &[])
+        .map_err(|e| format!("Failed to fetch managers: {}", e))?
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    
+    for i in 0..count {
+        let dept = departments[i % departments.len()];
+        let cc_type = cost_center_types[i % cost_center_types.len()];
+        let code = format!("CC-{:04}", i + 1);
+        let name = format!("{} - {}", dept, cc_type);
+        let manager_id = if !manager_ids.is_empty() {
+            manager_ids[i % manager_ids.len()]
+        } else {
+            1
+        };
+        let budget_allocation = Decimal::from_str(&format!("{:.2}", (50000.0..500000.0).fake::<f64>()))
+            .map_err(|e| format!("Failed to parse budget allocation: {}", e))?;
+        
+        client.execute(
+            "INSERT INTO cost_centers (cost_center_code, cost_center_name, department, manager_id, budget_allocation, is_active) 
+             VALUES ($1, $2, $3, $4, $5, $6)",
+            &[&code, &name, &dept, &manager_id, &budget_allocation, &true]
+        ).map_err(|e| format!("Failed to insert cost center: {}", e))?;
+        
+        inserted += 1;
+    }
+    
+    Ok(inserted)
+}
+
+/// Generate budgets for a fiscal year
+pub fn generate_budgets(client: &mut Client, fiscal_year: i32) -> Result<usize, String> {
+    let mut inserted = 0;
+    
+    let categories = vec![
+        ("revenue", vec!["vehicle_sales", "service_revenue", "parts_sales", "finance_income"]),
+        ("cogs", vec!["vehicle_cost", "parts_cost", "direct_labor"]),
+        ("operating_expenses", vec!["salaries", "rent", "utilities", "insurance", "marketing"]),
+        ("marketing", vec!["digital_ads", "traditional_media", "events", "promotions"]),
+    ];
+    
+    let departments = vec!["Sales", "Finance", "Marketing", "Operations", "IT", "HR"];
+    
+    // Get cost center IDs
+    let cost_center_ids: Vec<i32> = client
+        .query("SELECT cost_center_id FROM cost_centers WHERE is_active = true", &[])
+        .map_err(|e| format!("Failed to fetch cost centers: {}", e))?
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    
+    // Get an employee ID for created_by
+    let employee_id: i32 = client
+        .query_one("SELECT employee_id FROM employees LIMIT 1", &[])
+        .map_err(|e| format!("Failed to fetch employee: {}", e))?
+        .get(0);
+    
+    // Create budget version
+    client.execute(
+        "INSERT INTO budget_versions (fiscal_year, version_number, version_name, is_current, created_by) 
+         VALUES ($1, 1, 'Initial Budget', true, $2)",
+        &[&fiscal_year, &employee_id]
+    ).map_err(|e| format!("Failed to create budget version: {}", e))?;
+    
+    let version_id: i32 = client
+        .query_one("SELECT version_id FROM budget_versions WHERE fiscal_year = $1 AND version_number = 1", &[&fiscal_year])
+        .map_err(|e| format!("Failed to fetch version: {}", e))?
+        .get(0);
+    
+    // Generate monthly budgets for each category
+    for (category, subcategories) in &categories {
+        for subcategory in subcategories {
+            for month in 1..=12 {
+                let quarter = ((month - 1) / 3) + 1;
+                let dept = departments[(month - 1) % departments.len()];
+                let cc_id = if !cost_center_ids.is_empty() {
+                    Some(cost_center_ids[(month - 1) % cost_center_ids.len()])
+                } else {
+                    None
+                };
+                
+                // Generate realistic budget amounts based on category
+                let base_amount = match *category {
+                    "revenue" => (200000.0..500000.0).fake::<f64>(),
+                    "cogs" => (100000.0..300000.0).fake::<f64>(),
+                    "operating_expenses" => (50000.0..150000.0).fake::<f64>(),
+                    "marketing" => (10000.0..50000.0).fake::<f64>(),
+                    _ => (10000.0..100000.0).fake::<f64>(),
+                };
+                
+                let budgeted_amount = Decimal::from_str(&format!("{:.2}", base_amount))
+                    .map_err(|e| format!("Failed to parse budget amount: {}", e))?;
+                
+                client.execute(
+                    "INSERT INTO budgets (fiscal_year, fiscal_quarter, fiscal_month, category, subcategory, 
+                     department, cost_center_id, budgeted_amount, status, created_by, budget_version_id) 
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'approved', $9, $10)",
+                    &[&fiscal_year, &(quarter as i32), &(month as i32), category, subcategory, 
+                      &dept, &cc_id, &budgeted_amount, &employee_id, &version_id]
+                ).map_err(|e| format!("Failed to insert budget: {}", e))?;
+                
+                inserted += 1;
+            }
+        }
+    }
+    
+    Ok(inserted)
+}
+
+/// Generate actuals from existing sales and expenses
+pub fn generate_actuals_from_sales(client: &mut Client) -> Result<usize, String> {
+    let mut inserted = 0;
+    
+    // Get all sales and create actuals
+    let sales = client
+        .query("SELECT sale_id, sale_date, sale_price, vehicle_id FROM sales", &[])
+        .map_err(|e| format!("Failed to fetch sales: {}", e))?;
+    
+    for row in sales {
+        let sale_id: i32 = row.get(0);
+        let sale_date: NaiveDate = row.get(1);
+        let sale_price: Decimal = row.get(2);
+        let vehicle_id: i32 = row.get(3);
+        
+        let fiscal_year = sale_date.year();
+        let fiscal_month = sale_date.month() as i32;
+        let fiscal_quarter = ((fiscal_month - 1) / 3) + 1;
+        
+        // Get vehicle cost for COGS
+        let vehicle_cost: Decimal = client
+            .query_one("SELECT cost_price FROM vehicles WHERE vehicle_id = $1", &[&vehicle_id])
+            .map_err(|e| format!("Failed to fetch vehicle cost: {}", e))?
+            .get(0);
+        
+        // Insert revenue actual
+        client.execute(
+            "INSERT INTO actuals (transaction_date, fiscal_year, fiscal_quarter, fiscal_month, 
+             category, subcategory, actual_amount, reference_type, reference_id) 
+             VALUES ($1, $2, $3, $4, 'revenue', 'vehicle_sales', $5, 'sale', $6)",
+            &[&sale_date, &fiscal_year, &fiscal_quarter, &fiscal_month, &sale_price, &sale_id]
+        ).map_err(|e| format!("Failed to insert revenue actual: {}", e))?;
+        inserted += 1;
+        
+        // Insert COGS actual
+        client.execute(
+            "INSERT INTO actuals (transaction_date, fiscal_year, fiscal_quarter, fiscal_month, 
+             category, subcategory, actual_amount, reference_type, reference_id) 
+             VALUES ($1, $2, $3, $4, 'cogs', 'vehicle_cost', $5, 'sale', $6)",
+            &[&sale_date, &fiscal_year, &fiscal_quarter, &fiscal_month, &vehicle_cost, &sale_id]
+        ).map_err(|e| format!("Failed to insert COGS actual: {}", e))?;
+        inserted += 1;
+    }
+    
+    Ok(inserted)
+}
+
+/// Generate operating expenses
+pub fn generate_expenses(client: &mut Client, count: usize) -> Result<usize, String> {
+    let mut inserted = 0;
+    
+    let expense_types = vec![
+        ("payroll", 50000.0, 150000.0, true, "monthly"),
+        ("rent", 10000.0, 30000.0, true, "monthly"),
+        ("utilities", 2000.0, 8000.0, true, "monthly"),
+        ("marketing", 5000.0, 50000.0, false, ""),
+        ("insurance", 5000.0, 20000.0, true, "monthly"),
+        ("maintenance", 1000.0, 10000.0, false, ""),
+        ("supplies", 500.0, 5000.0, false, ""),
+        ("professional_services", 2000.0, 20000.0, false, ""),
+    ];
+    
+    let vendors = vec!["ABC Services", "XYZ Corp", "Local Utilities", "Insurance Co", "Marketing Agency"];
+    
+    // Get cost center IDs
+    let cost_center_ids: Vec<i32> = client
+        .query("SELECT cost_center_id FROM cost_centers WHERE is_active = true", &[])
+        .map_err(|e| format!("Failed to fetch cost centers: {}", e))?
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    
+    // Get an approver
+    let approver_id: i32 = client
+        .query_one("SELECT employee_id FROM employees WHERE role = 'General Manager' LIMIT 1", &[])
+        .map_err(|e| format!("Failed to fetch approver: {}", e))?
+        .get(0);
+    
+    let start_date = NaiveDate::from_ymd_opt(2023, 1, 1).unwrap();
+    let end_date = NaiveDate::from_ymd_opt(2023, 12, 31).unwrap();
+    
+    for i in 0..count {
+        let (expense_type, min_amt, max_amt, is_recurring, frequency) = &expense_types[i % expense_types.len()];
+        let vendor = vendors[i % vendors.len()];
+        let cc_id = if !cost_center_ids.is_empty() {
+            Some(cost_center_ids[i % cost_center_ids.len()])
+        } else {
+            None
+        };
+        
+        let days_range = (end_date - start_date).num_days();
+        let random_days = (0..days_range).fake::<i64>();
+        let expense_date = start_date + chrono::Duration::days(random_days);
+        
+        let amount = Decimal::from_str(&format!("{:.2}", (*min_amt..*max_amt).fake::<f64>()))
+            .map_err(|e| format!("Failed to parse expense amount: {}", e))?;
+        
+        let recurrence_freq = if *is_recurring { Some(*frequency) } else { None };
+        
+        client.execute(
+            "INSERT INTO expenses (expense_date, expense_type, category, cost_center_id, amount, 
+             vendor, is_recurring, recurrence_frequency, approved_by, status) 
+             VALUES ($1, $2, 'operating_expenses', $3, $4, $5, $6, $7, $8, 'approved')",
+            &[&expense_date, expense_type, &cc_id, &amount, &vendor, is_recurring, &recurrence_freq, &approver_id]
+        ).map_err(|e| format!("Failed to insert expense: {}", e))?;
+        
+        inserted += 1;
+    }
+    
+    Ok(inserted)
+}
+
+/// Generate KPI definitions
+pub fn generate_kpi_definitions(client: &mut Client) -> Result<usize, String> {
+    let kpis = vec![
+        // Financial KPIs
+        ("Total Revenue", "total_revenue", "Sum of all revenue", "currency", 1000000.0, 800000.0, 900000.0, 1000000.0, "financial", "monthly"),
+        ("Gross Profit Margin", "gross_margin", "Revenue - COGS / Revenue * 100", "percentage", 25.0, 15.0, 20.0, 25.0, "financial", "monthly"),
+        ("Net Profit Margin", "net_margin", "Net Income / Revenue * 100", "percentage", 10.0, 5.0, 8.0, 10.0, "financial", "monthly"),
+        ("Operating Expense Ratio", "opex_ratio", "Operating Expenses / Revenue * 100", "percentage", 20.0, 25.0, 22.0, 20.0, "financial", "monthly"),
+        
+        // Sales KPIs
+        ("Sales Volume", "sales_volume", "Number of vehicles sold", "count", 50.0, 30.0, 40.0, 50.0, "sales", "monthly"),
+        ("Average Deal Size", "avg_deal_size", "Average sale price per vehicle", "currency", 40000.0, 30000.0, 35000.0, 40000.0, "sales", "monthly"),
+        ("Sales Conversion Rate", "conversion_rate", "Sales / Leads * 100", "percentage", 25.0, 15.0, 20.0, 25.0, "sales", "monthly"),
+        ("Sales per Employee", "sales_per_employee", "Total sales / number of sales employees", "currency", 200000.0, 150000.0, 175000.0, 200000.0, "sales", "monthly"),
+        
+        // Inventory KPIs
+        ("Inventory Turnover", "inventory_turnover", "COGS / Average Inventory", "ratio", 8.0, 4.0, 6.0, 8.0, "inventory", "monthly"),
+        ("Days in Inventory", "days_in_inventory", "Average days vehicles sit before sale", "days", 30.0, 60.0, 45.0, 30.0, "inventory", "monthly"),
+        ("Inventory Value", "inventory_value", "Total value of available inventory", "currency", 2000000.0, 1500000.0, 1750000.0, 2000000.0, "inventory", "monthly"),
+        
+        // Customer KPIs
+        ("Customer Lifetime Value", "customer_ltv", "Average revenue per customer over lifetime", "currency", 50000.0, 30000.0, 40000.0, 50000.0, "customer", "quarterly"),
+        ("Customer Retention Rate", "retention_rate", "Repeat customers / total customers * 100", "percentage", 30.0, 15.0, 22.0, 30.0, "customer", "quarterly"),
+        ("Net Promoter Score", "nps", "Customer satisfaction score", "number", 50.0, 20.0, 35.0, 50.0, "customer", "quarterly"),
+    ];
+    
+    let mut inserted = 0;
+    
+    for (name, code, desc, unit, target, red, yellow, green, category, frequency) in kpis {
+        let target_dec = Decimal::from_str(&format!("{:.2}", target))
+            .map_err(|e| format!("Failed to parse target: {}", e))?;
+        let red_dec = Decimal::from_str(&format!("{:.2}", red))
+            .map_err(|e| format!("Failed to parse red threshold: {}", e))?;
+        let yellow_dec = Decimal::from_str(&format!("{:.2}", yellow))
+            .map_err(|e| format!("Failed to parse yellow threshold: {}", e))?;
+        let green_dec = Decimal::from_str(&format!("{:.2}", green))
+            .map_err(|e| format!("Failed to parse green threshold: {}", e))?;
+        
+        client.execute(
+            "INSERT INTO kpi_definitions (kpi_name, kpi_code, description, unit, target_value, 
+             threshold_red, threshold_yellow, threshold_green, category, frequency, is_active) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)",
+            &[&name, &code, &desc, &unit, &target_dec, &red_dec, &yellow_dec, &green_dec, &category, &frequency]
+        ).map_err(|e| format!("Failed to insert KPI definition: {}", e))?;
+        
+        inserted += 1;
+    }
+    
+    Ok(inserted)
+}
+
+/// Generate forecast scenarios
+pub fn generate_forecast_scenarios(client: &mut Client, fiscal_year: i32) -> Result<usize, String> {
+    let scenarios = vec![
+        ("Best Case Scenario", "best_case", "Optimistic projections with 20% growth"),
+        ("Most Likely Scenario", "most_likely", "Realistic projections with 10% growth"),
+        ("Worst Case Scenario", "worst_case", "Conservative projections with 5% decline"),
+    ];
+    
+    let employee_id: i32 = client
+        .query_one("SELECT employee_id FROM employees LIMIT 1", &[])
+        .map_err(|e| format!("Failed to fetch employee: {}", e))?
+        .get(0);
+    
+    let mut inserted = 0;
+    
+    for (name, stype, desc) in scenarios {
+        client.execute(
+            "INSERT INTO forecast_scenarios (scenario_name, scenario_type, fiscal_year, description, 
+             created_by, is_active) 
+             VALUES ($1, $2, $3, $4, $5, true)",
+            &[&name, &stype, &fiscal_year, &desc, &employee_id]
+        ).map_err(|e| format!("Failed to insert forecast scenario: {}", e))?;
+        
+        inserted += 1;
+    }
+    
+    Ok(inserted)
+}
+
+/// Generate all FP&A sample data
+pub fn generate_all_fpa_data(client: &mut Client, fiscal_year: i32) -> Result<(), String> {
+    println!("Generating FP&A sample data...");
+    
+    // 1. Cost Centers
+    let cc_count = generate_cost_centers(client, 10)?;
+    println!("Generated {} cost centers", cc_count);
+    
+    // 2. Budgets
+    let budget_count = generate_budgets(client, fiscal_year)?;
+    println!("Generated {} budget line items", budget_count);
+    
+    // 3. Actuals from sales
+    let actual_count = generate_actuals_from_sales(client)?;
+    println!("Generated {} actual transactions", actual_count);
+    
+    // 4. Expenses
+    let expense_count = generate_expenses(client, 200)?;
+    println!("Generated {} expenses", expense_count);
+    
+    // 5. KPI Definitions
+    let kpi_count = generate_kpi_definitions(client)?;
+    println!("Generated {} KPI definitions", kpi_count);
+    
+    // 6. Forecast Scenarios
+    let scenario_count = generate_forecast_scenarios(client, fiscal_year)?;
+    println!("Generated {} forecast scenarios", scenario_count);
+    
+    println!("FP&A data generation complete!");
+    
+    Ok(())
+}
