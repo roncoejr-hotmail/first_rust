@@ -1101,12 +1101,12 @@ async fn get_customer_analytics(
         .query_one("
             SELECT 
                 COALESCE(SUM(sale_price), 0) as total_clv,
-                COALESCE(AVG(customer_total), 0) as avg_customer_value
-            FROM (
-                SELECT customer_id, SUM(sale_price) as customer_total
-                FROM sales
-                GROUP BY customer_id
-            ) customer_totals
+                CASE 
+                    WHEN COUNT(DISTINCT customer_id) > 0 
+                    THEN COALESCE(SUM(sale_price), 0) / COUNT(DISTINCT customer_id)
+                    ELSE 0
+                END as avg_customer_value
+            FROM sales
         ", &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("CLV query error: {}", e)))?;
