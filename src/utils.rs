@@ -452,8 +452,8 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         let description: String = format!("Vehicle description {}", Faker.fake::<String>());
         
         client.execute(query, &[
-            vin.as_str(), make.as_str(), model.as_str(), &year, color.as_str(), &mileage, condition.as_str(), vehicle_type.as_str(),
-            &cost_price, &list_price, status.as_str(), date_acquired.as_str(), description.as_str()
+            &vin, &make, &model, &year, &color, &mileage, &condition, &vehicle_type,
+            &cost_price, &list_price, &status, &date_acquired, &description
         ]).map_err(|e| format!("Failed to insert vehicle: {}", e))?;
         
         inserted += 1;
@@ -494,8 +494,8 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
         let credit_score: i32 = (300..850).fake::<i32>();
         
         client.execute(query, &[
-            first_name.as_str(), last_name.as_str(), email.as_str(), phone.as_str(), address.as_str(), city.as_str(), state.as_str(), zip_code.as_str(),
-            date_of_birth.as_str(), &credit_score
+            &first_name, &last_name, &email, &phone, &address, &city, &state, &zip_code,
+            &date_of_birth, &credit_score
         ]).map_err(|e| format!("Failed to insert customer: {}", e))?;
         
         inserted += 1;
@@ -537,7 +537,7 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         let is_active: bool = true;
         
         client.execute(query, &[
-            first_name.as_str(), last_name.as_str(), email.as_str(), phone.as_str(), role.as_str(), hire_date.as_str(),
+            &first_name, &last_name, &email, &phone, &role, &hire_date,
             &commission_rate, &is_active
         ]).map_err(|e| format!("Failed to insert employee: {}", e))?;
         
@@ -597,8 +597,8 @@ pub fn generate_sample_sales(client: &mut postgres::Client, count: usize) -> Res
         let sale_status: String = "completed".to_string();
         
         let _row = client.query_one(query, &[
-            &vehicle_id, &customer_id, &salesperson_id, sale_date.as_str(),
-            &sale_price, &down_payment, payment_method.as_str(), sale_status.as_str()
+            &vehicle_id, &customer_id, &salesperson_id, &sale_date,
+            &sale_price, &down_payment, &payment_method, &sale_status
         ]).map_err(|e| format!("Failed to insert sale: {}", e))?;
         
         // Update vehicle status to 'sold'
@@ -652,7 +652,7 @@ pub fn generate_sample_loans(client: &mut postgres::Client) -> Result<usize, Str
         
         client.execute(query, &[
             &sale_id, &loan_amount, &interest_rate, &term_months, &monthly_payment,
-            loan_start_date.as_str(), loan_status.as_str(), &remaining_balance
+            &loan_start_date, &loan_status, &remaining_balance
         ]).map_err(|e| format!("Failed to insert loan: {}", e))?;
         
         inserted += 1;
@@ -715,7 +715,7 @@ pub fn generate_sample_payments(client: &mut postgres::Client, months_back: i32)
             let payment_status: String = "processed".to_string();
             
             client.execute(query, &[
-                &loan_id, payment_date.as_str(), &monthly_payment, payment_method.as_str(), payment_status.as_str(),
+                &loan_id, &payment_date, &monthly_payment, &payment_method, &payment_status,
                 &principal_amount, &interest_amount
             ]).map_err(|e| format!("Failed to insert payment: {}", e))?;
             
@@ -773,8 +773,8 @@ pub fn generate_sample_maintenance_history(client: &mut postgres::Client, count:
             let description = format!("{} service performed", service_type);
             
             client.execute(query, &[
-                &vehicle_id, service_date.as_str(), service_type.as_str(), &mileage_at_service,
-                service_provider.as_str(), &cost, description.as_str()
+                &vehicle_id, &service_date, &service_type, &mileage_at_service,
+                &service_provider, &cost, &description
             ]).map_err(|e| format!("Failed to insert maintenance record: {}", e))?;
             
             inserted += 1;
