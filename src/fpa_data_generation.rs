@@ -486,7 +486,6 @@ pub fn generate_rolling_forecasts(client: &mut Client) -> Result<usize, String> 
                               AND EXTRACT(YEAR FROM transaction_date) = $3
                               AND EXTRACT(MONTH FROM transaction_date) = $4
                         ", &[&category, &department, &(period_start.year() as i32), &(period_start.month() as i32)])
-                        .await
                         .ok()
                         .flatten();
                     
