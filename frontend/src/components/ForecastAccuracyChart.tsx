@@ -9,7 +9,7 @@ interface Props {
 export default function ForecastAccuracyChart({ data }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
 
-  useEffect() => {
+  useEffect(() => {
     if (!svgRef.current || data.length === 0) return;
 
     d3.select(svgRef.current).selectAll('*').remove();
