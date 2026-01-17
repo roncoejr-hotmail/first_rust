@@ -1,5 +1,25 @@
-import { ThemeProvider, createTheme, CssBaseline, AppBar, Toolbar, Typography, Button, Box } from '@mui/material';
+import { useState } from 'react';
+import {
+  ThemeProvider,
+  createTheme,
+  CssBaseline,
+  AppBar,
+  Toolbar,
+  Typography,
+  IconButton,
+  Drawer,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Divider,
+  Box,
+  Collapse
+} from '@mui/material';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import MenuIcon from '@mui/icons-material/Menu';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
@@ -9,6 +29,10 @@ import BuildIcon from '@mui/icons-material/Build';
 import BadgeIcon from '@mui/icons-material/Badge';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import ExpandLess from '@mui/icons-material/ExpandLess';
+import ExpandMore from '@mui/icons-material/ExpandMore';
+import BusinessIcon from '@mui/icons-material/Business';
+import AnalyticsIcon from '@mui/icons-material/Analytics';
 import ExecutiveDashboard from './pages/ExecutiveDashboard';
 import SalesPerformanceDashboard from './pages/SalesPerformanceDashboard';
 import InventoryDashboard from './pages/InventoryDashboard';
@@ -34,118 +58,162 @@ const theme = createTheme({
   },
 });
 
+const drawerWidth = 280;
+
+interface NavItem {
+  label: string;
+  path: string;
+  icon: JSX.Element;
+}
+
+interface NavSection {
+  title: string;
+  icon: JSX.Element;
+  items: NavItem[];
+}
+
+const navigationSections: NavSection[] = [
+  {
+    title: 'Operations',
+    icon: <BusinessIcon />,
+    items: [
+      { label: 'Executive Overview', path: '/', icon: <DashboardIcon /> },
+      { label: 'Sales Performance', path: '/sales-performance', icon: <TrendingUpIcon /> },
+      { label: 'Inventory', path: '/inventory', icon: <DirectionsCarIcon /> },
+      { label: 'Customers', path: '/customers', icon: <PeopleIcon /> },
+      { label: 'Employees', path: '/employees', icon: <BadgeIcon /> },
+      { label: 'Maintenance', path: '/maintenance', icon: <BuildIcon /> },
+    ],
+  },
+  {
+    title: 'Finance & Analytics',
+    icon: <AnalyticsIcon />,
+    items: [
+      { label: 'Finance & Loans', path: '/finance', icon: <AccountBalanceIcon /> },
+      { label: 'Forecasting', path: '/forecasting', icon: <ShowChartIcon /> },
+    ],
+  },
+  {
+    title: 'FP&A',
+    icon: <AttachMoneyIcon />,
+    items: [
+      { label: 'Budget Management', path: '/fpa/budget', icon: <AttachMoneyIcon /> },
+    ],
+  },
+];
+
 function Navigation() {
   const location = useLocation();
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [expandedSections, setExpandedSections] = useState<string[]>(['Operations', 'Finance & Analytics', 'FP&A']);
+
+  const toggleDrawer = () => {
+    setDrawerOpen(!drawerOpen);
+  };
+
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev =>
+      prev.includes(section) ? prev.filter(s => s !== section) : [...prev, section]
+    );
+  };
 
   return (
-    <AppBar position="static">
-      <Toolbar>
-        <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-          Automotive Sales Analytics
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button
+    <>
+      <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+        <Toolbar>
+          <IconButton
             color="inherit"
-            component={Link}
-            to="/"
-            startIcon={<DashboardIcon />}
-            sx={{
-              backgroundColor: location.pathname === '/' ? 'rgba(255,255,255,0.2)' : 'transparent',
-            }}
+            aria-label="toggle drawer"
+            onClick={toggleDrawer}
+            edge="start"
+            sx={{ mr: 2 }}
           >
-            Executive
-          </Button>
-          <Button
-            color="inherit"
-            component={Link}
-            to="/sales-performance"
-            startIcon={<TrendingUpIcon />}
-            sx={{
-              backgroundColor: location.pathname === '/sales-performance' ? 'rgba(255,255,255,0.2)' : 'transparent',
-            }}
-          >
-            Sales Performance
-          </Button>
-          <Button
-            color="inherit"
-            component={Link}
-            to="/inventory"
-            startIcon={<DirectionsCarIcon />}
-            sx={{
-              backgroundColor: location.pathname === '/inventory' ? 'rgba(255,255,255,0.2)' : 'transparent',
-            }}
-          >
-            Inventory
-          </Button>
-          <Button
-            color="inherit"
-            component={Link}
-            to="/finance"
-            startIcon={<AccountBalanceIcon />}
-            sx={{
-              backgroundColor: location.pathname === '/finance' ? 'rgba(255,255,255,0.2)' : 'transparent',
-            }}
-          >
-            Finance
-          </Button>
-          <Button
-            color="inherit"
-            component={Link}
-            to="/customers"
-            startIcon={<PeopleIcon />}
-            sx={{
-              backgroundColor: location.pathname === '/customers' ? 'rgba(255,255,255,0.2)' : 'transparent',
-            }}
-          >
-            Customers
-          </Button>
-          <Button
-            color="inherit"
-            component={Link}
-            to="/maintenance"
-            startIcon={<BuildIcon />}
-            sx={{
-              backgroundColor: location.pathname === '/maintenance' ? 'rgba(255,255,255,0.2)' : 'transparent',
-            }}
-          >
-            Maintenance
-          </Button>
-          <Button
-            color="inherit"
-            component={Link}
-            to="/employees"
-            startIcon={<BadgeIcon />}
-            sx={{
-              backgroundColor: location.pathname === '/employees' ? 'rgba(255,255,255,0.2)' : 'transparent',
-            }}
-          >
-            Employees
-          </Button>
-          <Button
-            color="inherit"
-            component={Link}
-            to="/forecasting"
-            startIcon={<ShowChartIcon />}
-            sx={{
-              backgroundColor: location.pathname === '/forecasting' ? 'rgba(255,255,255,0.2)' : 'transparent',
-            }}
-          >
-            Forecasting
-          </Button>
-          <Button
-            color="inherit"
-            component={Link}
-            to="/fpa/budget"
-            startIcon={<AttachMoneyIcon />}
-            sx={{
-              backgroundColor: location.pathname === '/fpa/budget' ? 'rgba(255,255,255,0.2)' : 'transparent',
-            }}
-          >
-            Budget
-          </Button>
-        </Box>
-      </Toolbar>
-    </AppBar>
+            <MenuIcon />
+          </IconButton>
+          <Typography variant="h6" noWrap component="div">
+            🚗 Automotive Sales Analytics
+          </Typography>
+        </Toolbar>
+      </AppBar>
+
+      <Drawer
+        variant="persistent"
+        anchor="left"
+        open={drawerOpen}
+        sx={{
+          width: drawerWidth,
+          flexShrink: 0,
+          '& .MuiDrawer-paper': {
+            width: drawerWidth,
+            boxSizing: 'border-box',
+          },
+        }}
+      >
+        <Toolbar>
+          <IconButton onClick={toggleDrawer}>
+            <ChevronLeftIcon />
+          </IconButton>
+        </Toolbar>
+        <Divider />
+
+        <List sx={{ pt: 0 }}>
+          {navigationSections.map((section) => (
+            <Box key={section.title}>
+              <ListItemButton
+                onClick={() => toggleSection(section.title)}
+                sx={{
+                  backgroundColor: '#f5f5f5',
+                  '&:hover': { backgroundColor: '#e0e0e0' },
+                }}
+              >
+                <ListItemIcon sx={{ color: '#1976d2' }}>{section.icon}</ListItemIcon>
+                <ListItemText
+                  primary={section.title}
+                  primaryTypographyProps={{ fontWeight: 'bold', fontSize: '0.9rem' }}
+                />
+                {expandedSections.includes(section.title) ? <ExpandLess /> : <ExpandMore />}
+              </ListItemButton>
+
+              <Collapse in={expandedSections.includes(section.title)} timeout="auto" unmountOnExit>
+                <List component="div" disablePadding>
+                  {section.items.map((item) => (
+                    <ListItem key={item.path} disablePadding>
+                      <ListItemButton
+                        component={Link}
+                        to={item.path}
+                        selected={location.pathname === item.path}
+                        sx={{
+                          pl: 4,
+                          '&.Mui-selected': {
+                            backgroundColor: '#e3f2fd',
+                            borderLeft: '4px solid #1976d2',
+                            '&:hover': {
+                              backgroundColor: '#bbdefb',
+                            },
+                          },
+                        }}
+                      >
+                        <ListItemIcon sx={{ minWidth: 40, color: location.pathname === item.path ? '#1976d2' : 'inherit' }}>
+                          {item.icon}
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={item.label}
+                          primaryTypographyProps={{
+                            fontSize: '0.875rem',
+                            fontWeight: location.pathname === item.path ? 600 : 400,
+                          }}
+                        />
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              </Collapse>
+              <Divider />
+            </Box>
+          ))}
+        </List>
+      </Drawer>
+    </>
   );
 }
 
@@ -154,18 +222,32 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Router>
-        <Navigation />
-        <Routes>
-          <Route path="/" element={<ExecutiveDashboard />} />
-          <Route path="/sales-performance" element={<SalesPerformanceDashboard />} />
-          <Route path="/inventory" element={<InventoryDashboard />} />
-          <Route path="/finance" element={<FinanceDashboard />} />
-          <Route path="/customers" element={<CustomerDashboard />} />
-          <Route path="/maintenance" element={<MaintenanceDashboard />} />
-          <Route path="/employees" element={<EmployeeDashboard />} />
-          <Route path="/forecasting" element={<ForecastingDashboard />} />
-          <Route path="/fpa/budget" element={<BudgetManagementDashboard />} />
-        </Routes>
+        <Box sx={{ display: 'flex' }}>
+          <Navigation />
+          <Box
+            component="main"
+            sx={{
+              flexGrow: 1,
+              p: 3,
+              mt: 8,
+              width: '100%',
+              minHeight: '100vh',
+              backgroundColor: '#fafafa',
+            }}
+          >
+            <Routes>
+              <Route path="/" element={<ExecutiveDashboard />} />
+              <Route path="/sales-performance" element={<SalesPerformanceDashboard />} />
+              <Route path="/inventory" element={<InventoryDashboard />} />
+              <Route path="/finance" element={<FinanceDashboard />} />
+              <Route path="/customers" element={<CustomerDashboard />} />
+              <Route path="/maintenance" element={<MaintenanceDashboard />} />
+              <Route path="/employees" element={<EmployeeDashboard />} />
+              <Route path="/forecasting" element={<ForecastingDashboard />} />
+              <Route path="/fpa/budget" element={<BudgetManagementDashboard />} />
+            </Routes>
+          </Box>
+        </Box>
       </Router>
     </ThemeProvider>
   );
