@@ -815,6 +815,54 @@ pub struct DepartmentVariance {
     pub variance_percentage: f64,
 }
 
+// KPI Scorecard Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KPIScorecardOverview {
+    pub total_kpis: i32,
+    pub kpis_on_track: i32,
+    pub kpis_at_risk: i32,
+    pub kpis_off_track: i32,
+    pub overall_score: f64,
+    pub kpis_by_category: Vec<KPICategory>,
+    pub kpi_details: Vec<KPIDetail>,
+    pub kpi_trends: Vec<KPITrend>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KPICategory {
+    pub category: String,
+    pub total_kpis: i32,
+    pub on_track: i32,
+    pub at_risk: i32,
+    pub off_track: i32,
+    pub average_achievement: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KPIDetail {
+    pub kpi_id: i32,
+    pub kpi_name: String,
+    pub category: String,
+    pub description: String,
+    pub unit: String,
+    pub frequency: String,
+    pub target_value: f64,
+    pub current_value: f64,
+    pub achievement_percentage: f64,
+    pub status: String, // 'on-track', 'at-risk', 'off-track'
+    pub is_higher_better: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KPITrend {
+    pub kpi_id: i32,
+    pub kpi_name: String,
+    pub period: String,
+    pub target: f64,
+    pub actual: f64,
+    pub achievement: f64,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -2589,6 +2637,205 @@ async fn get_financial_forecast(
     }))
 }
 
+// Handler for KPI scorecard dashboard
+async fn get_kpi_scorecard(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<KPIScorecardOverview>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    // Get all active KPI definitions
+    let kpi_rows = client
+        .query("
+            SELECT 
+                kd.kpi_id,
+                kd.kpi_name,
+                kd.category,
+                kd.description,
+                kd.unit,
+                kd.frequency,
+                kd.target_value,
+                kd.is_higher_better
+            FROM kpi_definitions kd
+            WHERE kd.is_active = true
+            ORDER BY kd.category, kd.kpi_name
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("KPI definitions error: {}", e)))?;
+    
+    let mut kpi_details = Vec::new();
+    let mut total_kpis = 0;
+    let mut kpis_on_track = 0;
+    let mut kpis_at_risk = 0;
+    let mut kpis_off_track = 0;
+    let mut total_achievement = 0.0;
+    
+    for row in kpi_rows {
+        let kpi_id: i32 = row.get(0);
+        let kpi_name: String = row.get(1);
+        let category: String = row.get(2);
+        let description: String = row.get(3);
+        let unit: String = row.get(4);
+        let frequency: String = row.get(5);
+        let target_decimal: Decimal = row.get(6);
+        let target_value: f64 = target_decimal.to_string().parse().unwrap_or(0.0);
+        let is_higher_better: bool = row.get(7);
+        
+        // Get most recent actual value for this KPI
+        let actual_result = client
+            .query_opt("
+                SELECT actual_value
+                FROM kpi_actuals
+                WHERE kpi_id = $1
+                ORDER BY period_date DESC
+                LIMIT 1
+            ", &[&kpi_id])
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("KPI actuals error: {}", e)))?;
+        
+        let current_value = if let Some(actual_row) = actual_result {
+            let value_decimal: Decimal = actual_row.get(0);
+            value_decimal.to_string().parse().unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        
+        // Calculate achievement percentage
+        let achievement_percentage = if target_value != 0.0 {
+            (current_value / target_value) * 100.0
+        } else {
+            0.0
+        };
+        
+        // Determine status based on achievement and direction
+        let status = if is_higher_better {
+            if achievement_percentage >= 90.0 {
+                "on-track"
+            } else if achievement_percentage >= 75.0 {
+                "at-risk"
+            } else {
+                "off-track"
+            }
+        } else {
+            // Lower is better (e.g., cost, defect rate)
+            if achievement_percentage <= 110.0 {
+                "on-track"
+            } else if achievement_percentage <= 125.0 {
+                "at-risk"
+            } else {
+                "off-track"
+            }
+        };
+        
+        match status {
+            "on-track" => kpis_on_track += 1,
+            "at-risk" => kpis_at_risk += 1,
+            _ => kpis_off_track += 1,
+        }
+        
+        total_kpis += 1;
+        total_achievement += achievement_percentage;
+        
+        kpi_details.push(KPIDetail {
+            kpi_id,
+            kpi_name,
+            category,
+            description,
+            unit,
+            frequency,
+            target_value,
+            current_value,
+            achievement_percentage,
+            status: status.to_string(),
+            is_higher_better,
+        });
+    }
+    
+    let overall_score = if total_kpis > 0 {
+        total_achievement / total_kpis as f64
+    } else {
+        0.0
+    };
+    
+    // Group by category
+    let mut category_map: std::collections::HashMap<String, (i32, i32, i32, i32, f64)> = std::collections::HashMap::new();
+    
+    for kpi in &kpi_details {
+        let entry = category_map.entry(kpi.category.clone()).or_insert((0, 0, 0, 0, 0.0));
+        entry.0 += 1; // total
+        match kpi.status.as_str() {
+            "on-track" => entry.1 += 1,
+            "at-risk" => entry.2 += 1,
+            "off-track" => entry.3 += 1,
+            _ => {}
+        }
+        entry.4 += kpi.achievement_percentage;
+    }
+    
+    let mut kpis_by_category = Vec::new();
+    for (category, (total, on_track, at_risk, off_track, total_ach)) in category_map {
+        let average_achievement = if total > 0 { total_ach / total as f64 } else { 0.0 };
+        kpis_by_category.push(KPICategory {
+            category,
+            total_kpis: total,
+            on_track,
+            at_risk,
+            off_track,
+            average_achievement,
+        });
+    }
+    
+    // Get KPI trends (last 12 periods for each KPI)
+    let trend_rows = client
+        .query("
+            SELECT 
+                ka.kpi_id,
+                kd.kpi_name,
+                TO_CHAR(ka.period_date, 'YYYY-MM') as period,
+                kd.target_value,
+                ka.actual_value
+            FROM kpi_actuals ka
+            JOIN kpi_definitions kd ON ka.kpi_id = kd.kpi_id
+            WHERE ka.period_date >= CURRENT_DATE - INTERVAL '12 months'
+            ORDER BY ka.kpi_id, ka.period_date
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Trend error: {}", e)))?;
+    
+    let mut kpi_trends = Vec::new();
+    for row in trend_rows {
+        let kpi_id: i32 = row.get(0);
+        let kpi_name: String = row.get(1);
+        let period: String = row.get(2);
+        let target_decimal: Decimal = row.get(3);
+        let target: f64 = target_decimal.to_string().parse().unwrap_or(0.0);
+        let actual_decimal: Decimal = row.get(4);
+        let actual: f64 = actual_decimal.to_string().parse().unwrap_or(0.0);
+        let achievement = if target != 0.0 { (actual / target) * 100.0 } else { 0.0 };
+        
+        kpi_trends.push(KPITrend {
+            kpi_id,
+            kpi_name,
+            period,
+            target,
+            actual,
+            achievement,
+        });
+    }
+    
+    Ok(Json(KPIScorecardOverview {
+        total_kpis,
+        kpis_on_track,
+        kpis_at_risk,
+        kpis_off_track,
+        overall_score,
+        kpis_by_category,
+        kpi_details,
+        kpi_trends,
+    }))
+}
+
 // Handler for variance analysis dashboard
 async fn get_variance_analysis(
     State(state): State<Arc<AppState>>,
@@ -3197,5 +3444,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/api/dashboard/forecasting", get(get_financial_forecast))
         .route("/api/fpa/budget-management", get(get_budget_management))
         .route("/api/fpa/variance-analysis", get(get_variance_analysis))
+        .route("/api/fpa/kpi-scorecard", get(get_kpi_scorecard))
         .with_state(state)
 }
