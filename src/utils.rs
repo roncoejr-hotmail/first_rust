@@ -457,22 +457,22 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
             eprintln!("DEBUG: cost_price = {}", cost_price);
         }
         
-        let vin_str: &str = vin.as_str();
-        let make_str: &str = make.as_str();
-        let model_str: &str = model.as_str();
-        let color_str: &str = color.as_str();
-        let condition_str: &str = condition.as_str();
-        let vehicle_type_str: &str = vehicle_type.as_str();
-        let status_str: &str = status.as_str();
-        let date_acquired_str: &str = date_acquired.as_str();
-        let description_str: &str = description.as_str();
+        // Store string slices to ensure proper lifetimes
+        let vin_slice = vin.as_str();
+        let make_slice = make.as_str();
+        let model_slice = model.as_str();
+        let color_slice = color.as_str();
+        let condition_slice = condition.as_str();
+        let vehicle_type_slice = vehicle_type.as_str();
+        let status_slice = status.as_str();
+        let date_acquired_slice = date_acquired.as_str();
+        let description_slice = description.as_str();
         
-        let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
-            &vin_str, &make_str, &model_str, &year, &color_str, &mileage, 
-            &condition_str, &vehicle_type_str, &cost_price, &list_price, 
-            &status_str, &date_acquired_str, &description_str
-        ];
-        client.execute(query, params).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}'): {}", vin, vehicle_type, e))?;
+        client.execute(query, &[
+            vin_slice, make_slice, model_slice, &year, color_slice, &mileage, 
+            condition_slice, vehicle_type_slice, &cost_price, &list_price, 
+            status_slice, date_acquired_slice, description_slice
+        ]).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}'): {}", vin, vehicle_type, e))?;
         
         inserted += 1;
     }
@@ -523,22 +523,22 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
             eprintln!("DEBUG: state = '{}', len = {}", state, state.len());
         }
         
-        let first_name_str: &str = first_name.as_str();
-        let last_name_str: &str = last_name.as_str();
-        let email_str: &str = email.as_str();
-        let phone_str: &str = phone.as_str();
-        let address_str: &str = address.as_str();
-        let city_str: &str = city.as_str();
-        let state_str: &str = state.as_str();
-        let zip_code_str: &str = zip_code.as_str();
-        let date_of_birth_str: &str = date_of_birth.as_str();
+        // Store string slices to ensure proper lifetimes
+        let first_name_slice = first_name.as_str();
+        let last_name_slice = last_name.as_str();
+        let email_slice = email.as_str();
+        let phone_slice = phone.as_str();
+        let address_slice = address.as_str();
+        let city_slice = city.as_str();
+        let state_slice = state.as_str();
+        let zip_code_slice = zip_code.as_str();
+        let date_of_birth_slice = date_of_birth.as_str();
         
-        let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
-            &first_name_str, &last_name_str, &email_str, &phone_str, 
-            &address_str, &city_str, &state_str, &zip_code_str,
-            &date_of_birth_str, &credit_score
-        ];
-        client.execute(query, params).map_err(|e| format!("Failed to insert customer (zip_code='{}', state='{}'): {}", zip_code, state, e))?;
+        client.execute(query, &[
+            first_name_slice, last_name_slice, email_slice, phone_slice, 
+            address_slice, city_slice, state_slice, zip_code_slice,
+            date_of_birth_slice, &credit_score
+        ]).map_err(|e| format!("Failed to insert customer (zip_code='{}', state='{}'): {}", zip_code, state, e))?;
         
         inserted += 1;
     }
@@ -584,18 +584,18 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
             eprintln!("DEBUG: commission_rate = {}", commission_rate);
         }
         
-        let first_name_str: &str = first_name.as_str();
-        let last_name_str: &str = last_name.as_str();
-        let email_str: &str = email.as_str();
-        let phone_str: &str = phone.as_str();
-        let role_str: &str = role.as_str();
-        let hire_date_str: &str = hire_date.as_str();
+        // Store string slices to ensure proper lifetimes
+        let first_name_slice = first_name.as_str();
+        let last_name_slice = last_name.as_str();
+        let email_slice = email.as_str();
+        let phone_slice = phone.as_str();
+        let role_slice = role.as_str();
+        let hire_date_slice = hire_date.as_str();
         
-        let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
-            &first_name_str, &last_name_str, &email_str, &phone_str, 
-            &role_str, &hire_date_str, &commission_rate, &is_active
-        ];
-        client.execute(query, params).map_err(|e| format!("Failed to insert employee (role='{}'): {}", role, e))?;
+        client.execute(query, &[
+            first_name_slice, last_name_slice, email_slice, phone_slice, 
+            role_slice, hire_date_slice, &commission_rate, &is_active
+        ]).map_err(|e| format!("Failed to insert employee (role='{}'): {}", role, e))?;
         
         inserted += 1;
     }
