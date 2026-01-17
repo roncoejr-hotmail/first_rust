@@ -634,7 +634,8 @@ async fn get_inventory_overview(
         let avg_cost: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
         let price_decimal: Decimal = row.get(2);
         let avg_sale_price: f64 = price_decimal.to_string().parse().unwrap_or(0.0);
-        let avg_markup_percentage: f64 = row.get(3);
+        let markup_decimal: Decimal = row.get(3);
+        let avg_markup_percentage: f64 = markup_decimal.to_string().parse().unwrap_or(0.0);
         let count: i64 = row.get(4);
         
         cost_vs_price_analysis.push(CostPriceAnalysis {
