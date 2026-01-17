@@ -396,6 +396,66 @@ pub struct LatePaymentStats {
     pub average_days_late: f64,
 }
 
+// Customer Analytics Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CustomerAnalytics {
+    pub total_customers: i64,
+    pub active_customers: i64,
+    pub repeat_customers: i64,
+    pub average_credit_score: f64,
+    pub total_customer_lifetime_value: f64,
+    pub average_customer_value: f64,
+    pub customers_by_state: Vec<StateDistribution>,
+    pub credit_score_distribution: Vec<CreditScoreBucket>,
+    pub top_customers: Vec<TopCustomer>,
+    pub customer_acquisition_trend: Vec<AcquisitionTrend>,
+    pub age_demographics: Vec<AgeDemographic>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StateDistribution {
+    pub state: String,
+    pub customer_count: i32,
+    pub total_purchases: f64,
+    pub average_credit_score: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreditScoreBucket {
+    pub score_range: String,
+    pub count: i32,
+    pub percentage: f64,
+    pub avg_purchase_value: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TopCustomer {
+    pub customer_id: i32,
+    pub customer_name: String,
+    pub email: String,
+    pub state: String,
+    pub total_purchases: f64,
+    pub purchase_count: i32,
+    pub credit_score: i32,
+    pub first_purchase_date: String,
+    pub last_purchase_date: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AcquisitionTrend {
+    pub month: String,
+    pub new_customers: i32,
+    pub total_purchases: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgeDemographic {
+    pub age_range: String,
+    pub count: i32,
+    pub percentage: f64,
+    pub avg_credit_score: f64,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -1004,6 +1064,274 @@ async fn get_finance_overview(
     }))
 }
 
+// Handler for customer analytics
+async fn get_customer_analytics(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<CustomerAnalytics>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    // Get total customer counts
+    let customer_stats = client
+        .query_one("
+            SELECT 
+                COUNT(*) as total_customers,
+                COUNT(DISTINCT CASE WHEN s.customer_id IS NOT NULL THEN c.customer_id END) as active_customers,
+                COUNT(DISTINCT CASE WHEN purchase_count > 1 THEN c.customer_id END) as repeat_customers,
+                COALESCE(AVG(c.credit_score), 0) as avg_credit_score
+            FROM customers c
+            LEFT JOIN (
+                SELECT customer_id, COUNT(*) as purchase_count
+                FROM sales
+                GROUP BY customer_id
+            ) s ON c.customer_id = s.customer_id
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let total_customers: i64 = customer_stats.get(0);
+    let active_customers: i64 = customer_stats.get(1);
+    let repeat_customers: i64 = customer_stats.get(2);
+    let avg_credit_decimal: rust_decimal::Decimal = customer_stats.get(3);
+    let average_credit_score: f64 = avg_credit_decimal.to_string().parse().unwrap_or(0.0);
+    
+    // Calculate customer lifetime value
+    let clv_row = client
+        .query_one("
+            SELECT 
+                COALESCE(SUM(sale_price), 0) as total_clv,
+                COALESCE(AVG(customer_total), 0) as avg_customer_value
+            FROM (
+                SELECT customer_id, SUM(sale_price) as customer_total
+                FROM sales
+                GROUP BY customer_id
+            ) customer_totals
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let clv_decimal: Decimal = clv_row.get(0);
+    let total_customer_lifetime_value: f64 = clv_decimal.to_string().parse().unwrap_or(0.0);
+    let avg_decimal: Decimal = clv_row.get(1);
+    let average_customer_value: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+    
+    // Get customers by state
+    let state_rows = client
+        .query("
+            SELECT 
+                c.state,
+                COUNT(DISTINCT c.customer_id) as customer_count,
+                COALESCE(SUM(s.sale_price), 0) as total_purchases,
+                COALESCE(AVG(c.credit_score), 0) as avg_credit_score
+            FROM customers c
+            LEFT JOIN sales s ON c.customer_id = s.customer_id
+            WHERE c.state IS NOT NULL AND c.state != ''
+            GROUP BY c.state
+            ORDER BY customer_count DESC
+            LIMIT 15
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut customers_by_state = Vec::new();
+    for row in state_rows {
+        let state: String = row.get(0);
+        let customer_count: i64 = row.get(1);
+        let purchases_decimal: Decimal = row.get(2);
+        let total_purchases: f64 = purchases_decimal.to_string().parse().unwrap_or(0.0);
+        let credit_decimal: Decimal = row.get(3);
+        let average_credit_score: f64 = credit_decimal.to_string().parse().unwrap_or(0.0);
+        
+        customers_by_state.push(StateDistribution {
+            state,
+            customer_count: customer_count as i32,
+            total_purchases,
+            average_credit_score,
+        });
+    }
+    
+    // Get credit score distribution
+    let credit_rows = client
+        .query("
+            SELECT 
+                CASE 
+                    WHEN credit_score >= 800 THEN '800-850 (Excellent)'
+                    WHEN credit_score >= 740 THEN '740-799 (Very Good)'
+                    WHEN credit_score >= 670 THEN '670-739 (Good)'
+                    WHEN credit_score >= 580 THEN '580-669 (Fair)'
+                    ELSE '300-579 (Poor)'
+                END as score_range,
+                COUNT(*) as count,
+                (COUNT(*)::float / (SELECT COUNT(*) FROM customers WHERE credit_score IS NOT NULL)::float * 100) as percentage,
+                COALESCE(AVG(s.sale_price), 0) as avg_purchase_value
+            FROM customers c
+            LEFT JOIN sales s ON c.customer_id = s.customer_id
+            WHERE c.credit_score IS NOT NULL
+            GROUP BY score_range
+            ORDER BY MIN(c.credit_score) DESC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut credit_score_distribution = Vec::new();
+    for row in credit_rows {
+        let score_range: String = row.get(0);
+        let count: i64 = row.get(1);
+        let percentage: f64 = row.get(2);
+        let avg_decimal: Decimal = row.get(3);
+        let avg_purchase_value: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        
+        credit_score_distribution.push(CreditScoreBucket {
+            score_range,
+            count: count as i32,
+            percentage,
+            avg_purchase_value,
+        });
+    }
+    
+    // Get top customers by lifetime value
+    let top_customer_rows = client
+        .query("
+            SELECT 
+                c.customer_id,
+                c.first_name || ' ' || c.last_name as customer_name,
+                c.email,
+                c.state,
+                COALESCE(SUM(s.sale_price), 0) as total_purchases,
+                COUNT(s.sale_id) as purchase_count,
+                c.credit_score,
+                MIN(s.sale_date) as first_purchase,
+                MAX(s.sale_date) as last_purchase
+            FROM customers c
+            LEFT JOIN sales s ON c.customer_id = s.customer_id
+            GROUP BY c.customer_id, c.first_name, c.last_name, c.email, c.state, c.credit_score
+            HAVING COUNT(s.sale_id) > 0
+            ORDER BY total_purchases DESC
+            LIMIT 10
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut top_customers = Vec::new();
+    for row in top_customer_rows {
+        let customer_id: i32 = row.get(0);
+        let customer_name: String = row.get(1);
+        let email: String = row.get(2);
+        let state: String = row.get(3);
+        let purchases_decimal: Decimal = row.get(4);
+        let total_purchases: f64 = purchases_decimal.to_string().parse().unwrap_or(0.0);
+        let purchase_count: i64 = row.get(5);
+        let credit_score: i32 = row.get(6);
+        let first_purchase: chrono::NaiveDate = row.get(7);
+        let last_purchase: chrono::NaiveDate = row.get(8);
+        
+        top_customers.push(TopCustomer {
+            customer_id,
+            customer_name,
+            email,
+            state,
+            total_purchases,
+            purchase_count: purchase_count as i32,
+            credit_score,
+            first_purchase_date: first_purchase.to_string(),
+            last_purchase_date: last_purchase.to_string(),
+        });
+    }
+    
+    // Get customer acquisition trend (last 12 months)
+    let acquisition_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(c.created_at, 'YYYY-MM') as month,
+                COUNT(DISTINCT c.customer_id) as new_customers,
+                COALESCE(SUM(s.sale_price), 0) as total_purchases
+            FROM customers c
+            LEFT JOIN sales s ON c.customer_id = s.customer_id 
+                AND DATE_TRUNC('month', s.sale_date) = DATE_TRUNC('month', c.created_at)
+            WHERE c.created_at >= CURRENT_DATE - INTERVAL '12 months'
+            GROUP BY TO_CHAR(c.created_at, 'YYYY-MM')
+            ORDER BY month DESC
+            LIMIT 12
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut customer_acquisition_trend = Vec::new();
+    for row in acquisition_rows {
+        let month: String = row.get(0);
+        let new_customers: i64 = row.get(1);
+        let purchases_decimal: Decimal = row.get(2);
+        let total_purchases: f64 = purchases_decimal.to_string().parse().unwrap_or(0.0);
+        
+        customer_acquisition_trend.push(AcquisitionTrend {
+            month,
+            new_customers: new_customers as i32,
+            total_purchases,
+        });
+    }
+    customer_acquisition_trend.reverse();
+    
+    // Get age demographics
+    let age_rows = client
+        .query("
+            SELECT 
+                CASE 
+                    WHEN age < 25 THEN '18-24'
+                    WHEN age < 35 THEN '25-34'
+                    WHEN age < 45 THEN '35-44'
+                    WHEN age < 55 THEN '45-54'
+                    WHEN age < 65 THEN '55-64'
+                    ELSE '65+'
+                END as age_range,
+                COUNT(*) as count,
+                (COUNT(*)::float / (SELECT COUNT(*) FROM customers WHERE date_of_birth IS NOT NULL)::float * 100) as percentage,
+                COALESCE(AVG(credit_score), 0) as avg_credit_score
+            FROM (
+                SELECT 
+                    customer_id,
+                    credit_score,
+                    EXTRACT(YEAR FROM AGE(CURRENT_DATE, date_of_birth)) as age
+                FROM customers
+                WHERE date_of_birth IS NOT NULL
+            ) age_calc
+            GROUP BY age_range
+            ORDER BY MIN(age)
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut age_demographics = Vec::new();
+    for row in age_rows {
+        let age_range: String = row.get(0);
+        let count: i64 = row.get(1);
+        let percentage: f64 = row.get(2);
+        let credit_decimal: Decimal = row.get(3);
+        let avg_credit_score: f64 = credit_decimal.to_string().parse().unwrap_or(0.0);
+        
+        age_demographics.push(AgeDemographic {
+            age_range,
+            count: count as i32,
+            percentage,
+            avg_credit_score,
+        });
+    }
+    
+    Ok(Json(CustomerAnalytics {
+        total_customers,
+        active_customers,
+        repeat_customers,
+        average_credit_score,
+        total_customer_lifetime_value,
+        average_customer_value,
+        customers_by_state,
+        credit_score_distribution,
+        top_customers,
+        customer_acquisition_trend,
+        age_demographics,
+    }))
+}
+
 // Health check endpoint
 async fn health_check() -> &'static str {
     "OK"
@@ -1019,5 +1347,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/api/dashboard/sales-performance", get(get_sales_performance))
         .route("/api/dashboard/inventory", get(get_inventory_overview))
         .route("/api/dashboard/finance", get(get_finance_overview))
+        .route("/api/dashboard/customers", get(get_customer_analytics))
         .with_state(state)
 }

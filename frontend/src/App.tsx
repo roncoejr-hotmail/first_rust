@@ -4,10 +4,12 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import PeopleIcon from '@mui/icons-material/People';
 import ExecutiveDashboard from './pages/ExecutiveDashboard';
 import SalesPerformanceDashboard from './pages/SalesPerformanceDashboard';
 import InventoryDashboard from './pages/InventoryDashboard';
 import FinanceDashboard from './pages/FinanceDashboard';
+import CustomerDashboard from './pages/CustomerDashboard';
 
 const theme = createTheme({
   palette: {
@@ -78,6 +80,17 @@ function Navigation() {
           >
             Finance
           </Button>
+          <Button
+            color="inherit"
+            component={Link}
+            to="/customers"
+            startIcon={<PeopleIcon />}
+            sx={{
+              backgroundColor: location.pathname === '/customers' ? 'rgba(255,255,255,0.2)' : 'transparent',
+            }}
+          >
+            Customers
+          </Button>
         </Box>
       </Toolbar>
     </AppBar>
@@ -95,6 +108,7 @@ function App() {
           <Route path="/sales-performance" element={<SalesPerformanceDashboard />} />
           <Route path="/inventory" element={<InventoryDashboard />} />
           <Route path="/finance" element={<FinanceDashboard />} />
+          <Route path="/customers" element={<CustomerDashboard />} />
         </Routes>
       </Router>
     </ThemeProvider>
