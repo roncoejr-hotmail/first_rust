@@ -664,25 +664,34 @@ pub fn generate_sample_sales(client: &mut postgres::Client, count: usize) -> Res
     
     for i in 0..count.min(vehicle_rows.len()).min(customer_rows.len()) {
         let vehicle_id: i32 = vehicle_rows[i].get(0);
-        let list_price: f32 = vehicle_rows[i].get(1);
+        let list_price_decimal: Decimal = vehicle_rows[i].get(1);
+        let list_price: f64 = list_price_decimal.to_string().parse().unwrap();
         let customer_id: i32 = customer_rows[i % customer_rows.len()].get(0);
         let salesperson_idx: usize = (0..employee_rows.len()).fake::<usize>();
         let salesperson_id: i32 = employee_rows[salesperson_idx].get(0);
         
-        let sale_price = list_price * (0.85..1.0).fake::<f32>();
+        let sale_price = list_price * (0.85..1.0).fake::<f64>();
         let payment_method_idx: usize = (0..payment_methods.len()).fake::<usize>();
         let payment_method: String = payment_methods[payment_method_idx].to_string();
         let down_payment = if payment_method == "Finance" || payment_method == "Lease" {
-            sale_price * (0.1..0.3).fake::<f32>()
+            sale_price * (0.1..0.3).fake::<f64>()
         } else {
             0.0
         };
-        let sale_date: String = format!("{}-{:02}-{:02}", (2023..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
+        let sale_year: i32 = (2023..2024).fake::<i32>();
+        let sale_month: i32 = (1..13).fake::<i32>();
+        let sale_day: i32 = (1..29).fake::<i32>();
+        let sale_date = NaiveDate::from_ymd_opt(sale_year, sale_month as u32, sale_day as u32).unwrap();
         let sale_status: String = "completed".to_string();
+        
+        let sale_price_decimal = Decimal::from_str(&format!("{:.2}", sale_price)).unwrap();
+        let down_payment_decimal = Decimal::from_str(&format!("{:.2}", down_payment)).unwrap();
+        let payment_method_str: &str = &payment_method;
+        let sale_status_str: &str = &sale_status;
         
         let _row = client.query_one(query, &[
             &vehicle_id, &customer_id, &salesperson_id, &sale_date,
-            &sale_price, &down_payment, &payment_method, &sale_status
+            &sale_price_decimal, &down_payment_decimal, &payment_method_str, &sale_status_str
         ]).map_err(|e| format!("Failed to insert sale: {}", e))?;
         
         // Update vehicle status to 'sold'
