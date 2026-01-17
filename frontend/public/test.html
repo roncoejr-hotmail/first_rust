@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .error { color: red; }
+        .success { color: green; }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #1976d2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #1565c0;
+        }
+    </style>
+</head>
+<body>
+    <h1>API Connection Test</h1>
+    
+    <button onclick="testAPI()">Test API Connection</button>
+    
+    <h2>Health Check:</h2>
+    <div id="health-result">Not tested yet</div>
+    
+    <h2>Executive Dashboard Data:</h2>
+    <div id="dashboard-result">Not tested yet</div>
+    
+    <script>
+        async function testAPI() {
+            const healthDiv = document.getElementById('health-result');
+            const dashboardDiv = document.getElementById('dashboard-result');
+            
+            // Test health endpoint
+            try {
+                healthDiv.innerHTML = 'Testing...';
+                const healthResponse = await fetch('http://localhost:3000/health');
+                const healthText = await healthResponse.text();
+                healthDiv.innerHTML = `<span class="success">✓ Success: ${healthText}</span>`;
+            } catch (error) {
+                healthDiv.innerHTML = `<span class="error">✗ Error: ${error.message}</span>`;
+            }
+            
+            // Test dashboard endpoint
+            try {
+                dashboardDiv.innerHTML = 'Testing...';
+                const dashboardResponse = await fetch('http://localhost:3000/api/dashboard/executive');
+                const dashboardData = await dashboardResponse.json();
+                dashboardDiv.innerHTML = `<span class="success">✓ Success!</span><pre>${JSON.stringify(dashboardData, null, 2)}</pre>`;
+            } catch (error) {
+                dashboardDiv.innerHTML = `<span class="error">✗ Error: ${error.message}</span>`;
+            }
+        }
+        
+        // Auto-run test on page load
+        window.addEventListener('load', testAPI);
+    </script>
+</body>
+</html>

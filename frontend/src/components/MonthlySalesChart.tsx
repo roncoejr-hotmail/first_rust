@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Card, CardContent, Typography, Box } from '@mui/material';
 import * as d3 from 'd3';
-import type { MonthlyRevenue } from '../api/dashboard';
+import type { MonthlySalesPerformance } from '../api/salesPerformance';
 
-interface RevenueChartProps {
-  data: MonthlyRevenue[];
+interface MonthlySalesChartProps {
+  data: MonthlySalesPerformance[];
 }
 
-export default function RevenueChart({ data }: RevenueChartProps) {
+export default function MonthlySalesChart({ data }: MonthlySalesChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
@@ -34,11 +34,11 @@ export default function RevenueChart({ data }: RevenueChartProps) {
       .scaleBand()
       .domain(data.map((d) => d.month))
       .range([0, width])
-      .padding(0.1);
+      .padding(0.2);
 
     const y = d3
       .scaleLinear()
-      .domain([0, d3.max(data, (d) => d.revenue) || 0])
+      .domain([0, d3.max(data, (d) => d.sales_count) || 0])
       .nice()
       .range([height, 0]);
 
@@ -51,7 +51,7 @@ export default function RevenueChart({ data }: RevenueChartProps) {
       .attr('transform', 'rotate(-45)')
       .style('text-anchor', 'end');
 
-    svg.append('g').call(d3.axisLeft(y).tickFormat((d) => `$${(d as number / 1000).toFixed(0)}k`));
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
 
     // Bars
     svg
@@ -61,10 +61,10 @@ export default function RevenueChart({ data }: RevenueChartProps) {
       .append('rect')
       .attr('class', 'bar')
       .attr('x', (d) => x(d.month)!)
-      .attr('y', (d) => y(d.revenue))
+      .attr('y', (d) => y(d.sales_count))
       .attr('width', x.bandwidth())
-      .attr('height', (d) => height - y(d.revenue))
-      .attr('fill', '#1976d2')
+      .attr('height', (d) => height - y(d.sales_count))
+      .attr('fill', '#4caf50')
       .attr('opacity', 0.8)
       .on('mouseover', function() {
         d3.select(this).attr('opacity', 1);
@@ -73,32 +73,20 @@ export default function RevenueChart({ data }: RevenueChartProps) {
         d3.select(this).attr('opacity', 0.8);
       });
 
-    // Line
-    const line = d3
-      .line<MonthlyRevenue>()
-      .x((d) => x(d.month)! + x.bandwidth() / 2)
-      .y((d) => y(d.revenue))
-      .curve(d3.curveMonotoneX);
-
+    // Add labels on bars
     svg
-      .append('path')
-      .datum(data)
-      .attr('fill', 'none')
-      .attr('stroke', '#ff6b6b')
-      .attr('stroke-width', 2)
-      .attr('d', line);
-
-    // Points
-    svg
-      .selectAll('.dot')
+      .selectAll('.label')
       .data(data)
       .enter()
-      .append('circle')
-      .attr('class', 'dot')
-      .attr('cx', (d) => x(d.month)! + x.bandwidth() / 2)
-      .attr('cy', (d) => y(d.revenue))
-      .attr('r', 4)
-      .attr('fill', '#ff6b6b');
+      .append('text')
+      .attr('class', 'label')
+      .attr('x', (d) => x(d.month)! + x.bandwidth() / 2)
+      .attr('y', (d) => y(d.sales_count) - 5)
+      .attr('text-anchor', 'middle')
+      .style('font-size', '12px')
+      .style('font-weight', 'bold')
+      .style('fill', '#333')
+      .text((d) => d.sales_count);
 
   }, [data]);
 
@@ -106,7 +94,7 @@ export default function RevenueChart({ data }: RevenueChartProps) {
     <Card>
       <CardContent>
         <Typography variant="h6" gutterBottom>
-          Revenue Trend
+          Monthly Sales Volume
         </Typography>
         <Box sx={{ width: '100%', overflow: 'hidden' }}>
           <svg ref={svgRef} style={{ width: '100%', height: '300px' }} />

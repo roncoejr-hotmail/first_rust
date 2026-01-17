@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Card, CardContent, Typography, Box } from '@mui/material';
 import * as d3 from 'd3';
-import { PaymentMethodStat } from '../api/dashboard';
+import type { PaymentMethodStat } from '../api/dashboard';
 
 interface PaymentMethodChartProps {
   data: PaymentMethodStat[];
@@ -60,7 +60,7 @@ export default function PaymentMethodChart({ data }: PaymentMethodChartProps) {
     slices
       .append('path')
       .attr('d', arc)
-      .attr('fill', (d, i) => color(i.toString()))
+      .attr('fill', (_d, i) => color(i.toString()))
       .attr('stroke', 'white')
       .attr('stroke-width', 2)
       .on('mouseover', function() {

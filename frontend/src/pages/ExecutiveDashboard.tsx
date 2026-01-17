@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
   Container,
-  Grid,
   Typography,
   CircularProgress,
   Box,
@@ -16,7 +15,8 @@ import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import KPICard from '../components/KPICard';
 import RevenueChart from '../components/RevenueChart';
 import PaymentMethodChart from '../components/PaymentMethodChart';
-import { fetchExecutiveOverview, ExecutiveOverview } from '../api/dashboard';
+import { fetchExecutiveOverview } from '../api/dashboard';
+import type { ExecutiveOverview } from '../api/dashboard';
 
 export default function ExecutiveDashboard() {
   const [data, setData] = useState<ExecutiveOverview | null>(null);
@@ -77,58 +77,58 @@ export default function ExecutiveDashboard() {
       </Typography>
 
       {/* KPI Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
+      <Box sx={{ display: 'flex', gap: 3, mb: 3, flexWrap: 'wrap' }}>
+        <Box sx={{ flex: '1 1 250px', minWidth: '250px' }}>
           <KPICard
             title="Total Revenue"
             value={formatCurrency(data.total_revenue)}
             subtitle={`${data.total_sales} sales`}
             icon={<AttachMoneyIcon sx={{ fontSize: 40 }} />}
           />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        </Box>
+        <Box sx={{ flex: '1 1 250px', minWidth: '250px' }}>
           <KPICard
             title="Average Sale Price"
             value={formatCurrency(data.average_sale_price)}
             icon={<ShoppingCartIcon sx={{ fontSize: 40 }} />}
           />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        </Box>
+        <Box sx={{ flex: '1 1 250px', minWidth: '250px' }}>
           <KPICard
             title="Inventory"
             value={data.total_vehicles}
             subtitle={`${data.available_vehicles} available`}
             icon={<DirectionsCarIcon sx={{ fontSize: 40 }} />}
           />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        </Box>
+        <Box sx={{ flex: '1 1 250px', minWidth: '250px' }}>
           <KPICard
             title="Active Loans"
             value={data.active_loans}
             subtitle={formatCurrency(data.loan_portfolio_value)}
             icon={<AccountBalanceIcon sx={{ fontSize: 40 }} />}
           />
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
 
       {/* Charts */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} lg={8}>
+      <Box sx={{ display: 'flex', gap: 3, mb: 3, flexWrap: 'wrap' }}>
+        <Box sx={{ flex: '2 1 600px', minWidth: '300px' }}>
           <RevenueChart data={data.revenue_by_month} />
-        </Grid>
-        <Grid item xs={12} lg={4}>
+        </Box>
+        <Box sx={{ flex: '1 1 300px', minWidth: '300px' }}>
           <PaymentMethodChart data={data.sales_by_payment_method} />
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
 
       {/* Top Selling Types */}
       <Paper sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom>
           Top Selling Vehicle Types
         </Typography>
-        <Grid container spacing={2}>
+        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
           {data.top_selling_types.map((type) => (
-            <Grid item xs={12} sm={6} md={4} key={type.vehicle_type}>
+            <Box key={type.vehicle_type} sx={{ flex: '1 1 300px', minWidth: '250px' }}>
               <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                 <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
                   {type.vehicle_type}
@@ -140,14 +140,14 @@ export default function ExecutiveDashboard() {
                   {formatCurrency(type.total_revenue)}
                 </Typography>
               </Box>
-            </Grid>
+            </Box>
           ))}
-        </Grid>
+        </Box>
       </Paper>
 
       {/* Footer Stats */}
-      <Grid container spacing={3} sx={{ mt: 3 }}>
-        <Grid item xs={12} sm={6}>
+      <Box sx={{ display: 'flex', gap: 3, mt: 3, flexWrap: 'wrap' }}>
+        <Box sx={{ flex: '1 1 300px' }}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>
             <PeopleIcon sx={{ fontSize: 40, color: 'primary.main', mb: 1 }} />
             <Typography variant="h4">{data.total_customers}</Typography>
@@ -155,8 +155,8 @@ export default function ExecutiveDashboard() {
               Total Customers
             </Typography>
           </Paper>
-        </Grid>
-        <Grid item xs={12} sm={6}>
+        </Box>
+        <Box sx={{ flex: '1 1 300px' }}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>
             <PeopleIcon sx={{ fontSize: 40, color: 'secondary.main', mb: 1 }} />
             <Typography variant="h4">{data.total_employees}</Typography>
@@ -164,8 +164,8 @@ export default function ExecutiveDashboard() {
               Total Employees
             </Typography>
           </Paper>
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
     </Container>
   );
 }

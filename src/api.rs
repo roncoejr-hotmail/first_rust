@@ -246,6 +246,248 @@ async fn get_executive_overview(
     }))
 }
 
+// Sales Performance Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SalesPerformance {
+    pub total_sales_count: i64,
+    pub total_revenue: f64,
+    pub total_commission_paid: f64,
+    pub average_deal_size: f64,
+    pub top_performers: Vec<SalespersonPerformance>,
+    pub sales_by_month: Vec<MonthlySalesPerformance>,
+    pub sales_by_payment_method: Vec<PaymentMethodBreakdown>,
+    pub sales_by_vehicle_type: Vec<VehicleTypeBreakdown>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SalespersonPerformance {
+    pub employee_id: i32,
+    pub name: String,
+    pub role: String,
+    pub total_sales: i32,
+    pub total_revenue: f64,
+    pub commission_earned: f64,
+    pub average_sale_price: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MonthlySalesPerformance {
+    pub month: String,
+    pub sales_count: i32,
+    pub revenue: f64,
+    pub average_deal_size: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PaymentMethodBreakdown {
+    pub method: String,
+    pub count: i32,
+    pub total_value: f64,
+    pub percentage: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VehicleTypeBreakdown {
+    pub vehicle_type: String,
+    pub count: i32,
+    pub total_revenue: f64,
+    pub average_price: f64,
+}
+
+// Handler for sales performance dashboard
+async fn get_sales_performance(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<SalesPerformance>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    // Get overall metrics
+    let metrics_row = client
+        .query_one("
+            SELECT 
+                COUNT(*) as total_sales,
+                COALESCE(SUM(sale_price), 0) as total_revenue,
+                COALESCE(AVG(sale_price), 0) as avg_deal_size
+            FROM sales
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let total_sales_count: i64 = metrics_row.get(0);
+    let total_revenue_decimal: Decimal = metrics_row.get(1);
+    let total_revenue: f64 = total_revenue_decimal.to_string().parse().unwrap_or(0.0);
+    let avg_deal_size_decimal: Decimal = metrics_row.get(2);
+    let average_deal_size: f64 = avg_deal_size_decimal.to_string().parse().unwrap_or(0.0);
+    
+    // Get total commission paid (from employees table - sum of commission_rate * sales)
+    let commission_row = client
+        .query_one("
+            SELECT COALESCE(SUM(s.sale_price * (e.commission_rate / 100)), 0) as total_commission
+            FROM sales s
+            JOIN employees e ON s.salesperson_id = e.employee_id
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let total_commission_decimal: Decimal = commission_row.get(0);
+    let total_commission_paid: f64 = total_commission_decimal.to_string().parse().unwrap_or(0.0);
+    
+    // Get top performers (salespeople)
+    let performers_rows = client
+        .query("
+            SELECT 
+                e.employee_id,
+                e.first_name || ' ' || e.last_name as name,
+                e.role,
+                COUNT(s.sale_id) as total_sales,
+                COALESCE(SUM(s.sale_price), 0) as total_revenue,
+                COALESCE(SUM(s.sale_price * (e.commission_rate / 100)), 0) as commission_earned,
+                COALESCE(AVG(s.sale_price), 0) as avg_sale_price
+            FROM employees e
+            LEFT JOIN sales s ON e.employee_id = s.salesperson_id
+            WHERE e.role IN ('Salesperson', 'Sales Manager')
+            GROUP BY e.employee_id, e.first_name, e.last_name, e.role
+            ORDER BY total_revenue DESC
+            LIMIT 10
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut top_performers = Vec::new();
+    for row in performers_rows {
+        let employee_id: i32 = row.get(0);
+        let name: String = row.get(1);
+        let role: String = row.get(2);
+        let total_sales: i64 = row.get(3);
+        let revenue_decimal: Decimal = row.get(4);
+        let total_revenue: f64 = revenue_decimal.to_string().parse().unwrap_or(0.0);
+        let commission_decimal: Decimal = row.get(5);
+        let commission_earned: f64 = commission_decimal.to_string().parse().unwrap_or(0.0);
+        let avg_decimal: Decimal = row.get(6);
+        let average_sale_price: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        
+        top_performers.push(SalespersonPerformance {
+            employee_id,
+            name,
+            role,
+            total_sales: total_sales as i32,
+            total_revenue,
+            commission_earned,
+            average_sale_price,
+        });
+    }
+    
+    // Get sales by month
+    let monthly_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(sale_date, 'YYYY-MM') as month,
+                COUNT(*) as sales_count,
+                SUM(sale_price) as revenue,
+                AVG(sale_price) as avg_deal_size
+            FROM sales
+            GROUP BY TO_CHAR(sale_date, 'YYYY-MM')
+            ORDER BY month DESC
+            LIMIT 12
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut sales_by_month = Vec::new();
+    for row in monthly_rows {
+        let month: String = row.get(0);
+        let sales_count: i64 = row.get(1);
+        let revenue_decimal: Decimal = row.get(2);
+        let revenue: f64 = revenue_decimal.to_string().parse().unwrap_or(0.0);
+        let avg_decimal: Decimal = row.get(3);
+        let average_deal_size: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        
+        sales_by_month.push(MonthlySalesPerformance {
+            month,
+            sales_count: sales_count as i32,
+            revenue,
+            average_deal_size,
+        });
+    }
+    sales_by_month.reverse();
+    
+    // Get sales by payment method
+    let payment_rows = client
+        .query("
+            SELECT 
+                payment_method,
+                COUNT(*) as count,
+                SUM(sale_price) as total,
+                (COUNT(*)::float / (SELECT COUNT(*) FROM sales)::float * 100) as percentage
+            FROM sales
+            GROUP BY payment_method
+            ORDER BY count DESC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut sales_by_payment_method = Vec::new();
+    for row in payment_rows {
+        let method: String = row.get(0);
+        let count: i64 = row.get(1);
+        let total_decimal: Decimal = row.get(2);
+        let total_value: f64 = total_decimal.to_string().parse().unwrap_or(0.0);
+        let percentage: f64 = row.get(3);
+        
+        sales_by_payment_method.push(PaymentMethodBreakdown {
+            method,
+            count: count as i32,
+            total_value,
+            percentage,
+        });
+    }
+    
+    // Get sales by vehicle type
+    let vehicle_rows = client
+        .query("
+            SELECT 
+                v.vehicle_type,
+                COUNT(*) as count,
+                SUM(s.sale_price) as total_revenue,
+                AVG(s.sale_price) as avg_price
+            FROM sales s
+            JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+            GROUP BY v.vehicle_type
+            ORDER BY total_revenue DESC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut sales_by_vehicle_type = Vec::new();
+    for row in vehicle_rows {
+        let vehicle_type: String = row.get(0);
+        let count: i64 = row.get(1);
+        let revenue_decimal: Decimal = row.get(2);
+        let total_revenue: f64 = revenue_decimal.to_string().parse().unwrap_or(0.0);
+        let avg_decimal: Decimal = row.get(3);
+        let average_price: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        
+        sales_by_vehicle_type.push(VehicleTypeBreakdown {
+            vehicle_type,
+            count: count as i32,
+            total_revenue,
+            average_price,
+        });
+    }
+    
+    Ok(Json(SalesPerformance {
+        total_sales_count,
+        total_revenue,
+        total_commission_paid,
+        average_deal_size,
+        top_performers,
+        sales_by_month,
+        sales_by_payment_method,
+        sales_by_vehicle_type,
+    }))
+}
+
 // Health check endpoint
 async fn health_check() -> &'static str {
     "OK"
@@ -258,5 +500,6 @@ pub fn create_router(db_name: String) -> Router {
     Router::new()
         .route("/health", get(health_check))
         .route("/api/dashboard/executive", get(get_executive_overview))
+        .route("/api/dashboard/sales-performance", get(get_sales_performance))
         .with_state(state)
 }
