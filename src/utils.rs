@@ -473,9 +473,9 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         let description_str: &str = &description;
         
         client.execute(query, &[
-            vin_str, make_str, model_str, &year, color_str, &mileage,
-            condition_str, vehicle_type_str, &cost_price_str, &list_price_str,
-            status_str, date_acquired_str, description_str
+            &vin_str, &make_str, &model_str, &year, &color_str, &mileage,
+            &condition_str, &vehicle_type_str, &cost_price_str, &list_price_str,
+            &status_str, &date_acquired_str, &description_str
         ]).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}', cost_price='{}'): {}", vin, vehicle_type, cost_price_str, e))?;
         
         inserted += 1;
@@ -539,9 +539,9 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
         let date_of_birth_str: &str = &date_of_birth;
         
         client.execute(query, &[
-            first_name_str, last_name_str, email_str, phone_str,
-            address_str, city_str, state_str, zip_code_str,
-            date_of_birth_str, &credit_score
+            &first_name_str, &last_name_str, &email_str, &phone_str,
+            &address_str, &city_str, &state_str, &zip_code_str,
+            &date_of_birth_str, &credit_score
         ]).map_err(|e| format!("Failed to insert customer (zip_code='{}', state='{}'): {}", zip_code, state, e))?;
         
         inserted += 1;
@@ -600,8 +600,8 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         let hire_date_str: &str = &hire_date;
         
         client.execute(query, &[
-            first_name_str, last_name_str, email_str, phone_str,
-            role_str, hire_date_str, &commission_rate_str, &is_active
+            &first_name_str, &last_name_str, &email_str, &phone_str,
+            &role_str, &hire_date_str, &commission_rate_str, &is_active
         ]).map_err(|e| format!("Failed to insert employee (role='{}', commission_rate='{}'): {}", role, commission_rate_str, e))?;
         
         inserted += 1;
