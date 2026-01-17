@@ -435,17 +435,20 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
             let idx: usize = (0..chars.len()).fake::<usize>();
             chars.chars().nth(idx).unwrap()
         }).collect();
-        let make: &str = makes[(0..makes.len()).fake::<usize>()];
-        let model: &str = models[(0..models.len()).fake::<usize>()];
+        let make: String = makes[(0..makes.len()).fake::<usize>()].to_string();
+        let model: String = models[(0..models.len()).fake::<usize>()].to_string();
         let year: i32 = (2010..2025).fake::<i32>();
-        let color: &str = colors[(0..colors.len()).fake::<usize>()];
+        let color: String = colors[(0..colors.len()).fake::<usize>()].to_string();
         let mileage: i32 = (0..150000).fake::<i32>();
-        let condition = if mileage == 0 { "New" } else if mileage < 50000 { "Certified Pre-owned" } else { "Used" };
-        let vehicle_type: &str = vehicle_types[(0..vehicle_types.len()).fake::<usize>()];
+        let condition: String = if mileage == 0 { "New".to_string() } else if mileage < 50000 { "Certified Pre-owned".to_string() } else { "Used".to_string() };
+        let vehicle_type: String = vehicle_types[(0..vehicle_types.len()).fake::<usize>()].to_string();
         let cost_price: f64 = (15000.0..60000.0).fake::<f64>();
         let list_price = cost_price * 1.15;
-        let status = if (0..2).fake::<i32>() == 0 { "available" } else { "pending" };
-        let date_acquired: String = format!("{}-{:02}-{:02}", (2020..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
+        let status: String = if (0..2).fake::<i32>() == 0 { "available".to_string() } else { "pending".to_string() };
+        let acquired_year: i32 = (2020..2024).fake::<i32>();
+        let acquired_month: i32 = (1..13).fake::<i32>();
+        let acquired_day: i32 = if acquired_month == 2 { (1..29).fake::<i32>() } else if acquired_month == 4 || acquired_month == 6 || acquired_month == 9 || acquired_month == 11 { (1..31).fake::<i32>() } else { (1..32).fake::<i32>() };
+        let date_acquired: String = format!("{}-{:02}-{:02}", acquired_year, acquired_month, acquired_day);
         let description: String = format!("Vehicle description {}", Faker.fake::<String>());
         
         client.execute(query, &[
@@ -473,15 +476,21 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
     let query = "INSERT INTO customers (first_name, last_name, email, phone, address, city, state, zip_code, date_of_birth, credit_score) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)";
     
     for _ in 0..count {
-        let first_name: String = Faker.fake::<String>();
-        let last_name: String = Faker.fake::<String>();
-        let email: String = format!("{}.{}@{}.com", Faker.fake::<String>(), Faker.fake::<String>(), Faker.fake::<String>());
+        let first_name: String = Faker.fake::<String>().chars().take(50).collect();
+        let last_name: String = Faker.fake::<String>().chars().take(50).collect();
+        let email: String = format!("{}.{}@{}.com", 
+            Faker.fake::<String>().chars().take(30).collect::<String>(), 
+            Faker.fake::<String>().chars().take(30).collect::<String>(), 
+            Faker.fake::<String>().chars().take(30).collect::<String>()).chars().take(100).collect();
         let phone: String = format!("{}-{}-{}", (100..1000).fake::<i32>(), (100..1000).fake::<i32>(), (1000..10000).fake::<i32>());
-        let address: String = format!("{} {}", (1..9999).fake::<i32>(), Faker.fake::<String>());
-        let city: String = Faker.fake::<String>();
+        let address: String = format!("{} {}", (1..9999).fake::<i32>(), Faker.fake::<String>().chars().take(190).collect::<String>()).chars().take(200).collect();
+        let city: String = Faker.fake::<String>().chars().take(50).collect();
         let state: String = format!("{}", Faker.fake::<char>()).repeat(2).to_uppercase();
         let zip_code: String = format!("{}", (10000..99999).fake::<i32>());
-        let date_of_birth: String = format!("{}-{:02}-{:02}", (1950..2000).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
+        let birth_year: i32 = (1950..2000).fake::<i32>();
+        let birth_month: i32 = (1..13).fake::<i32>();
+        let birth_day: i32 = if birth_month == 2 { (1..29).fake::<i32>() } else if birth_month == 4 || birth_month == 6 || birth_month == 9 || birth_month == 11 { (1..31).fake::<i32>() } else { (1..32).fake::<i32>() };
+        let date_of_birth: String = format!("{}-{:02}-{:02}", birth_year, birth_month, birth_day);
         let credit_score: i32 = (300..850).fake::<i32>();
         
         client.execute(query, &[
@@ -510,12 +519,15 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
     let query = "INSERT INTO employees (first_name, last_name, email, phone, role, hire_date, commission_rate, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)";
     
     for _ in 0..count {
-        let first_name: String = Faker.fake::<String>();
-        let last_name: String = Faker.fake::<String>();
-        let email: String = format!("{}.{}@{}.com", Faker.fake::<String>(), Faker.fake::<String>(), Faker.fake::<String>());
+        let first_name: String = Faker.fake::<String>().chars().take(50).collect();
+        let last_name: String = Faker.fake::<String>().chars().take(50).collect();
+        let email: String = format!("{}.{}@{}.com", 
+            Faker.fake::<String>().chars().take(30).collect::<String>(), 
+            Faker.fake::<String>().chars().take(30).collect::<String>(), 
+            Faker.fake::<String>().chars().take(30).collect::<String>()).chars().take(100).collect();
         let phone: String = format!("{}-{}-{}", (100..1000).fake::<i32>(), (100..1000).fake::<i32>(), (1000..10000).fake::<i32>());
         let role_idx: usize = (0..roles.len()).fake::<usize>();
-        let role = roles[role_idx];
+        let role: String = roles[role_idx].to_string();
         let hire_date: String = format!("{}-{:02}-{:02}", (2015..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
         let commission_rate: f64 = match role {
             "Salesperson" => (2.0..5.0).fake::<f64>(),
@@ -575,14 +587,14 @@ pub fn generate_sample_sales(client: &mut postgres::Client, count: usize) -> Res
         
         let sale_price = list_price * (0.85..1.0).fake::<f32>();
         let payment_method_idx: usize = (0..payment_methods.len()).fake::<usize>();
-        let payment_method = payment_methods[payment_method_idx];
+        let payment_method: String = payment_methods[payment_method_idx].to_string();
         let down_payment = if payment_method == "Finance" || payment_method == "Lease" {
             sale_price * (0.1..0.3).fake::<f32>()
         } else {
             0.0
         };
         let sale_date: String = format!("{}-{:02}-{:02}", (2023..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
-        let sale_status = "completed";
+        let sale_status: String = "completed".to_string();
         
         let _row = client.query_one(query, &[
             &vehicle_id, &customer_id, &salesperson_id, &sale_date,
@@ -635,7 +647,7 @@ pub fn generate_sample_loans(client: &mut postgres::Client) -> Result<usize, Str
         };
         
         let loan_start_date = sale_date.clone();
-        let loan_status = "active";
+        let loan_status: String = "active".to_string();
         let remaining_balance = loan_amount;
         
         client.execute(query, &[
@@ -699,8 +711,8 @@ pub fn generate_sample_payments(client: &mut postgres::Client, months_back: i32)
             let principal_amount = monthly_payment - interest_amount;
             
             let payment_method_idx: usize = (0..payment_methods.len()).fake::<usize>();
-            let payment_method = payment_methods[payment_method_idx];
-            let payment_status = "processed";
+            let payment_method: String = payment_methods[payment_method_idx].to_string();
+            let payment_status: String = "processed".to_string();
             
             client.execute(query, &[
                 &loan_id, &payment_date, &monthly_payment, &payment_method, &payment_status,
@@ -743,12 +755,12 @@ pub fn generate_sample_maintenance_history(client: &mut postgres::Client, count:
         
         for _ in 0..num_services {
             let service_type_idx: usize = (0..service_types.len()).fake::<usize>();
-            let service_type = service_types[service_type_idx];
+            let service_type: String = service_types[service_type_idx].to_string();
             let service_provider_idx: usize = (0..service_providers.len()).fake::<usize>();
-            let service_provider = service_providers[service_provider_idx];
+            let service_provider: String = service_providers[service_provider_idx].to_string();
             
             let mileage_at_service: i32 = (0..current_mileage).fake::<i32>();
-            let cost: f64 = match service_type {
+            let cost: f64 = match service_type.as_str() {
                 "Oil Change" => (25.0..75.0).fake::<f64>(),
                 "Tire Rotation" => (20.0..50.0).fake::<f64>(),
                 "Brake Service" => (150.0..500.0).fake::<f64>(),
