@@ -451,21 +451,18 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         let date_acquired: String = format!("{}-{:02}-{:02}", acquired_year, acquired_month, acquired_day);
         let description: String = format!("Vehicle description {}", Faker.fake::<String>());
         
-        // Convert DECIMAL types to String for PostgreSQL serialization
-        let cost_price_str: String = format!("{:.2}", cost_price);
-        let list_price_str: String = format!("{:.2}", list_price);
-        
         // Debug: print values to identify the issue
         if inserted == 0 {
             eprintln!("DEBUG: vehicle_type = '{}', len = {}", vehicle_type, vehicle_type.len());
-            eprintln!("DEBUG: cost_price = {}, cost_price_str = '{}'", cost_price, cost_price_str);
+            eprintln!("DEBUG: cost_price = {}", cost_price);
         }
         
         let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
-            &vin, &make, &model, &year, &color, &mileage, &condition, &vehicle_type,
-            &cost_price_str, &list_price_str, &status, &date_acquired, &description
+            &vin as &str, &make as &str, &model as &str, &year, &color as &str, &mileage, 
+            &condition as &str, &vehicle_type as &str, &cost_price, &list_price, 
+            &status as &str, &date_acquired as &str, &description as &str
         ];
-        client.execute(query, params).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}', cost_price='{}'): {}", vin, vehicle_type, cost_price_str, e))?;
+        client.execute(query, params).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}'): {}", vin, vehicle_type, e))?;
         
         inserted += 1;
     }
@@ -496,7 +493,13 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
         let phone: String = format!("{}-{}-{}", (100..1000).fake::<i32>(), (100..1000).fake::<i32>(), (1000..10000).fake::<i32>());
         let address: String = format!("{} {}", (1..9999).fake::<i32>(), Faker.fake::<String>().chars().take(190).collect::<String>()).chars().take(200).collect();
         let city: String = Faker.fake::<String>().chars().take(50).collect();
-        let state: String = format!("{}", Faker.fake::<char>()).repeat(2).to_uppercase();
+        let us_states = vec!["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
+                              "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+                              "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+                              "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+                              "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"];
+        let state_idx: usize = (0..us_states.len()).fake::<usize>();
+        let state: String = us_states[state_idx].to_string();
         let zip_code: String = format!("{}", (10000..99999).fake::<i32>());
         let birth_year: i32 = (1950..2000).fake::<i32>();
         let birth_month: i32 = (1..13).fake::<i32>();
@@ -511,8 +514,9 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
         }
         
         let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
-            &first_name, &last_name, &email, &phone, &address, &city, &state, &zip_code,
-            &date_of_birth, &credit_score
+            &first_name as &str, &last_name as &str, &email as &str, &phone as &str, 
+            &address as &str, &city as &str, &state as &str, &zip_code as &str,
+            &date_of_birth as &str, &credit_score
         ];
         client.execute(query, params).map_err(|e| format!("Failed to insert customer (zip_code='{}', state='{}'): {}", zip_code, state, e))?;
         
@@ -554,20 +558,17 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         };
         let is_active: bool = true;
         
-        // Convert DECIMAL type to String for PostgreSQL serialization
-        let commission_rate_str: String = format!("{:.2}", commission_rate);
-        
         // Debug: print values to identify the issue
         if inserted == 0 {
             eprintln!("DEBUG: role = '{}', len = {}", role, role.len());
-            eprintln!("DEBUG: commission_rate = {}, commission_rate_str = '{}'", commission_rate, commission_rate_str);
+            eprintln!("DEBUG: commission_rate = {}", commission_rate);
         }
         
         let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
-            &first_name, &last_name, &email, &phone, &role, &hire_date,
-            &commission_rate_str, &is_active
+            &first_name as &str, &last_name as &str, &email as &str, &phone as &str, 
+            &role as &str, &hire_date as &str, &commission_rate, &is_active
         ];
-        client.execute(query, params).map_err(|e| format!("Failed to insert employee (role='{}', commission_rate='{}'): {}", role, commission_rate_str, e))?;
+        client.execute(query, params).map_err(|e| format!("Failed to insert employee (role='{}'): {}", role, e))?;
         
         inserted += 1;
     }
