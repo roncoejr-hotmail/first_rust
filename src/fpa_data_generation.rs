@@ -432,7 +432,9 @@ pub fn generate_rolling_forecasts(client: &mut Client) -> Result<usize, String> 
     // Generate rolling forecasts for the past 6 months (simulating historical forecasts)
     // For each historical month, we create a 12-month forward forecast
     for months_ago in (0..6).rev() {
-        let forecast_created = today - Duration::days((months_ago * 30) as i64);
+        let forecast_created_date = today - Duration::days((months_ago * 30) as i64);
+        // Convert date to datetime at midnight for TIMESTAMP field
+        let forecast_created = forecast_created_date.and_hms_opt(0, 0, 0).unwrap();
         
         // For each category, create 12 months of forecasts
         for cat_row in &categories {
@@ -458,7 +460,7 @@ pub fn generate_rolling_forecasts(client: &mut Client) -> Result<usize, String> 
             
             // Generate 12 months forward from the forecast creation date
             for month_offset in 0..12 {
-                let forecast_period = forecast_created + Duration::days((month_offset * 30) as i64);
+                let forecast_period = forecast_created_date + Duration::days((month_offset * 30) as i64);
                 let period_start = chrono::NaiveDate::from_ymd_opt(
                     forecast_period.year(),
                     forecast_period.month(),
@@ -508,7 +510,10 @@ pub fn generate_rolling_forecasts(client: &mut Client) -> Result<usize, String> 
                             let var_pct_dec = Decimal::from_str(&format!("{:.2}", var_pct))
                                 .map_err(|e| format!("Failed to parse var %: {}", e))?;
                             
-                            (Some(actual_dec), Some(period_start), Some(var_dec), Some(var_pct_dec))
+                            // Convert period_start (DATE) to TIMESTAMP at midnight
+                            let actual_recorded_datetime = period_start.and_hms_opt(0, 0, 0).unwrap();
+                            
+                            (Some(actual_dec), Some(actual_recorded_datetime), Some(var_dec), Some(var_pct_dec))
                         } else {
                             (None, None, None, None)
                         }
