@@ -45,6 +45,7 @@ import BudgetManagementDashboard from './pages/BudgetManagementDashboard';
 import VarianceAnalysisDashboard from './pages/VarianceAnalysisDashboard';
 import KPIScorecardDashboard from './pages/KPIScorecardDashboard';
 import ScenarioPlanningDashboard from './pages/ScenarioPlanningDashboard';
+import RollingForecastDashboard from './pages/RollingForecastDashboard';
 
 const theme = createTheme({
   palette: {
@@ -104,6 +105,7 @@ const navigationSections: NavSection[] = [
       { label: 'Variance Analysis', path: '/fpa/variance', icon: <TrendingUpIcon /> },
       { label: 'KPI Scorecard', path: '/fpa/kpi', icon: <ShowChartIcon /> },
       { label: 'Scenario Planning', path: '/fpa/scenarios', icon: <TrendingUpIcon /> },
+      { label: 'Rolling Forecast', path: '/fpa/rolling', icon: <ShowChartIcon /> },
     ],
   },
 ];
@@ -254,6 +256,7 @@ function App() {
               <Route path="/fpa/variance" element={<VarianceAnalysisDashboard />} />
               <Route path="/fpa/kpi" element={<KPIScorecardDashboard />} />
               <Route path="/fpa/scenarios" element={<ScenarioPlanningDashboard />} />
+              <Route path="/fpa/rolling" element={<RollingForecastDashboard />} />
             </Routes>
           </Box>
         </Box>

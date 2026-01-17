@@ -910,6 +910,55 @@ pub struct CategoryScenarioBreakdown {
     pub worst_case: f64,
 }
 
+// Rolling Forecast Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RollingForecastOverview {
+    pub latest_forecast_date: String,
+    pub total_forecasted: f64,
+    pub total_actual: f64,
+    pub total_variance: f64,
+    pub forecast_accuracy: f64,
+    pub rolling_forecast_trend: Vec<RollingForecastTrend>,
+    pub forecast_vs_actual: Vec<ForecastVsActual>,
+    pub category_forecast: Vec<CategoryForecast>,
+    pub forecast_accuracy_by_category: Vec<ForecastAccuracy>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RollingForecastTrend {
+    pub period: String,
+    pub forecasted: f64,
+    pub actual: f64,
+    pub variance: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ForecastVsActual {
+    pub period: String,
+    pub category: String,
+    pub forecasted: f64,
+    pub actual: f64,
+    pub variance_percentage: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CategoryForecast {
+    pub category: String,
+    pub current_month: f64,
+    pub next_3_months: f64,
+    pub next_6_months: f64,
+    pub next_12_months: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ForecastAccuracy {
+    pub category: String,
+    pub total_forecasted: f64,
+    pub total_actual: f64,
+    pub accuracy_percentage: f64,
+    pub avg_variance_percentage: f64,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -2684,6 +2733,219 @@ async fn get_financial_forecast(
     }))
 }
 
+// Handler for rolling forecast dashboard
+async fn get_rolling_forecast(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<RollingForecastOverview>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    // Get the most recent forecast creation date
+    let latest_date_row = client
+        .query_one("
+            SELECT MAX(forecast_created_date)::date
+            FROM rolling_forecasts
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Latest date error: {:?}", e)))?;
+    
+    let latest_date: chrono::NaiveDate = latest_date_row.get(0);
+    let latest_forecast_date = latest_date.format("%Y-%m-%d").to_string();
+    
+    // Get overall totals for the latest forecast
+    let totals_row = client
+        .query_one("
+            SELECT 
+                COALESCE(SUM(forecasted_value), 0) as total_forecasted,
+                COALESCE(SUM(actual_value), 0) as total_actual,
+                COALESCE(SUM(variance), 0) as total_variance
+            FROM rolling_forecasts
+            WHERE forecast_created_date::date = $1
+        ", &[&latest_date])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Totals error: {:?}", e)))?;
+    
+    let forecast_dec: Decimal = totals_row.get(0);
+    let total_forecasted: f64 = forecast_dec.to_string().parse().unwrap_or(0.0);
+    let actual_dec: Decimal = totals_row.get(1);
+    let total_actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+    let variance_dec: Decimal = totals_row.get(2);
+    let total_variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+    
+    let forecast_accuracy = if total_forecasted > 0.0 {
+        100.0 - ((total_variance.abs() / total_forecasted) * 100.0)
+    } else {
+        0.0
+    };
+    
+    // Get rolling forecast trend (12 months from latest forecast)
+    let trend_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(forecast_period, 'YYYY-MM') as period,
+                COALESCE(SUM(forecasted_value), 0) as forecasted,
+                COALESCE(SUM(actual_value), 0) as actual,
+                COALESCE(SUM(variance), 0) as variance
+            FROM rolling_forecasts
+            WHERE forecast_created_date::date = $1
+            GROUP BY forecast_period
+            ORDER BY forecast_period
+            LIMIT 12
+        ", &[&latest_date])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Trend error: {:?}", e)))?;
+    
+    let mut rolling_forecast_trend = Vec::new();
+    for row in trend_rows {
+        let period: String = row.get(0);
+        let forecasted_dec: Decimal = row.get(1);
+        let forecasted: f64 = forecasted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(2);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let variance_dec: Decimal = row.get(3);
+        let variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+        
+        rolling_forecast_trend.push(RollingForecastTrend {
+            period,
+            forecasted,
+            actual,
+            variance,
+        });
+    }
+    
+    // Get forecast vs actual (only for periods with actuals)
+    let fva_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(forecast_period, 'YYYY-MM') as period,
+                category,
+                forecasted_value,
+                actual_value,
+                variance_percentage
+            FROM rolling_forecasts
+            WHERE forecast_created_date::date = $1
+              AND actual_value IS NOT NULL
+            ORDER BY forecast_period, category
+            LIMIT 50
+        ", &[&latest_date])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("FVA error: {:?}", e)))?;
+    
+    let mut forecast_vs_actual = Vec::new();
+    for row in fva_rows {
+        let period: String = row.get(0);
+        let category: String = row.get(1);
+        let forecasted_dec: Decimal = row.get(2);
+        let forecasted: f64 = forecasted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(3);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let var_pct_dec: Decimal = row.get(4);
+        let variance_percentage: f64 = var_pct_dec.to_string().parse().unwrap_or(0.0);
+        
+        forecast_vs_actual.push(ForecastVsActual {
+            period,
+            category,
+            forecasted,
+            actual,
+            variance_percentage,
+        });
+    }
+    
+    // Get category forecast (current + future periods)
+    let cat_forecast_rows = client
+        .query("
+            SELECT 
+                category,
+                COALESCE(SUM(CASE WHEN forecast_period <= CURRENT_DATE + INTERVAL '1 month' THEN forecasted_value ELSE 0 END), 0) as current_month,
+                COALESCE(SUM(CASE WHEN forecast_period <= CURRENT_DATE + INTERVAL '3 months' THEN forecasted_value ELSE 0 END), 0) as next_3_months,
+                COALESCE(SUM(CASE WHEN forecast_period <= CURRENT_DATE + INTERVAL '6 months' THEN forecasted_value ELSE 0 END), 0) as next_6_months,
+                COALESCE(SUM(forecasted_value), 0) as next_12_months
+            FROM rolling_forecasts
+            WHERE forecast_created_date::date = $1
+              AND forecast_period >= CURRENT_DATE
+            GROUP BY category
+            ORDER BY next_12_months DESC
+        ", &[&latest_date])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Category forecast error: {:?}", e)))?;
+    
+    let mut category_forecast = Vec::new();
+    for row in cat_forecast_rows {
+        let category: String = row.get(0);
+        let current_dec: Decimal = row.get(1);
+        let current_month: f64 = current_dec.to_string().parse().unwrap_or(0.0);
+        let m3_dec: Decimal = row.get(2);
+        let next_3_months: f64 = m3_dec.to_string().parse().unwrap_or(0.0);
+        let m6_dec: Decimal = row.get(3);
+        let next_6_months: f64 = m6_dec.to_string().parse().unwrap_or(0.0);
+        let m12_dec: Decimal = row.get(4);
+        let next_12_months: f64 = m12_dec.to_string().parse().unwrap_or(0.0);
+        
+        category_forecast.push(CategoryForecast {
+            category,
+            current_month,
+            next_3_months,
+            next_6_months,
+            next_12_months,
+        });
+    }
+    
+    // Get forecast accuracy by category
+    let accuracy_rows = client
+        .query("
+            SELECT 
+                category,
+                COALESCE(SUM(forecasted_value), 0) as total_forecasted,
+                COALESCE(SUM(actual_value), 0) as total_actual,
+                COALESCE(AVG(ABS(variance_percentage)), 0) as avg_var_pct
+            FROM rolling_forecasts
+            WHERE forecast_created_date::date = $1
+              AND actual_value IS NOT NULL
+            GROUP BY category
+            ORDER BY total_forecasted DESC
+        ", &[&latest_date])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Accuracy error: {:?}", e)))?;
+    
+    let mut forecast_accuracy_by_category = Vec::new();
+    for row in accuracy_rows {
+        let category: String = row.get(0);
+        let forecasted_dec: Decimal = row.get(1);
+        let total_forecasted: f64 = forecasted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(2);
+        let total_actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let avg_var_dec: Decimal = row.get(3);
+        let avg_variance_percentage: f64 = avg_var_dec.to_string().parse().unwrap_or(0.0);
+        
+        let accuracy_percentage = if total_forecasted > 0.0 {
+            100.0 - avg_variance_percentage
+        } else {
+            0.0
+        };
+        
+        forecast_accuracy_by_category.push(ForecastAccuracy {
+            category,
+            total_forecasted,
+            total_actual,
+            accuracy_percentage,
+            avg_variance_percentage,
+        });
+    }
+    
+    Ok(Json(RollingForecastOverview {
+        latest_forecast_date,
+        total_forecasted,
+        total_actual,
+        total_variance,
+        forecast_accuracy,
+        rolling_forecast_trend,
+        forecast_vs_actual,
+        category_forecast,
+        forecast_accuracy_by_category,
+    }))
+}
+
 // Handler for scenario planning dashboard
 async fn get_scenario_planning(
     State(state): State<Arc<AppState>>,
@@ -3718,5 +3980,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/api/fpa/variance-analysis", get(get_variance_analysis))
         .route("/api/fpa/kpi-scorecard", get(get_kpi_scorecard))
         .route("/api/fpa/scenario-planning", get(get_scenario_planning))
+        .route("/api/fpa/rolling-forecast", get(get_rolling_forecast))
         .with_state(state)
 }

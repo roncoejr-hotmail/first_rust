@@ -407,6 +407,149 @@ pub fn generate_forecast_data(client: &mut Client, fiscal_year: i32) -> Result<u
     Ok(inserted)
 }
 
+pub fn generate_rolling_forecasts(client: &mut Client) -> Result<usize, String> {
+    use chrono::{Datelike, Duration};
+    use rand::Rng;
+    
+    let mut rng = rand::thread_rng();
+    let mut inserted = 0;
+    
+    // Get budget data as baseline for forecasting
+    let categories = client
+        .query("
+            SELECT DISTINCT category, department 
+            FROM budgets 
+            WHERE fiscal_year = 2023 AND status = 'approved'
+        ", &[])
+        .map_err(|e| format!("Failed to query categories: {}", e))?;
+    
+    if categories.is_empty() {
+        return Err("No budget data found. Run budget generation first.".to_string());
+    }
+    
+    let today = chrono::Local::now().naive_local().date();
+    
+    // Generate rolling forecasts for the past 6 months (simulating historical forecasts)
+    // For each historical month, we create a 12-month forward forecast
+    for months_ago in (0..6).rev() {
+        let forecast_created = today - Duration::days((months_ago * 30) as i64);
+        
+        // For each category, create 12 months of forecasts
+        for cat_row in &categories {
+            let category: String = cat_row.get(0);
+            let department: String = cat_row.get(1);
+            
+            // Get average monthly budget for this category
+            let avg_budget_result = client
+                .query_one("
+                    SELECT COALESCE(AVG(budgeted_amount), 0)
+                    FROM budgets
+                    WHERE category = $1 AND department = $2 
+                      AND fiscal_year = 2023 AND status = 'approved'
+                ", &[&category, &department])
+                .map_err(|e| format!("Failed to query avg budget: {}", e))?;
+            
+            let avg_decimal: Decimal = avg_budget_result.get(0);
+            let avg_budget: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+            
+            if avg_budget == 0.0 {
+                continue;
+            }
+            
+            // Generate 12 months forward from the forecast creation date
+            for month_offset in 0..12 {
+                let forecast_period = forecast_created + Duration::days((month_offset * 30) as i64);
+                let period_start = chrono::NaiveDate::from_ymd_opt(
+                    forecast_period.year(),
+                    forecast_period.month(),
+                    1
+                ).unwrap_or(forecast_period);
+                
+                // Add growth trend and seasonality
+                let growth_factor = 1.0 + (month_offset as f64 * 0.005); // 0.5% monthly growth
+                let seasonality = 1.0 + ((month_offset as f64 * 0.5).sin() * 0.1); // ±10% seasonal variation
+                let random_var = rng.gen_range(0.95..1.05);
+                
+                let forecasted_value = avg_budget * growth_factor * seasonality * random_var;
+                let forecast_dec = Decimal::from_str(&format!("{:.2}", forecasted_value))
+                    .map_err(|e| format!("Failed to parse forecast: {}", e))?;
+                
+                // If this period is in the past, we can add actual values and variance
+                let (actual_value, actual_recorded_date, variance, variance_pct) = if period_start < today {
+                    // Get actual from actuals table if it exists
+                    let actual_result = client
+                        .query_opt("
+                            SELECT COALESCE(SUM(actual_amount), 0)
+                            FROM actuals
+                            WHERE category = $1 
+                              AND department = $2
+                              AND EXTRACT(YEAR FROM transaction_date) = $3
+                              AND EXTRACT(MONTH FROM transaction_date) = $4
+                        ", &[&category, &department, &(period_start.year() as i32), &(period_start.month() as i32)])
+                        .await
+                        .ok()
+                        .flatten();
+                    
+                    if let Some(actual_row) = actual_result {
+                        let actual_dec: Decimal = actual_row.get(0);
+                        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+                        
+                        if actual > 0.0 {
+                            let var = actual - forecasted_value;
+                            let var_pct = if forecasted_value > 0.0 {
+                                (var / forecasted_value) * 100.0
+                            } else {
+                                0.0
+                            };
+                            
+                            let actual_dec = Decimal::from_str(&format!("{:.2}", actual))
+                                .map_err(|e| format!("Failed to parse actual: {}", e))?;
+                            let var_dec = Decimal::from_str(&format!("{:.2}", var))
+                                .map_err(|e| format!("Failed to parse variance: {}", e))?;
+                            let var_pct_dec = Decimal::from_str(&format!("{:.2}", var_pct))
+                                .map_err(|e| format!("Failed to parse var %: {}", e))?;
+                            
+                            (Some(actual_dec), Some(period_start), Some(var_dec), Some(var_pct_dec))
+                        } else {
+                            (None, None, None, None)
+                        }
+                    } else {
+                        (None, None, None, None)
+                    }
+                } else {
+                    (None, None, None, None)
+                };
+                
+                // Insert rolling forecast
+                client
+                    .execute(
+                        "INSERT INTO rolling_forecasts 
+                         (forecast_period, category, department, forecasted_value, 
+                          actual_value, variance, variance_percentage,
+                          forecast_created_date, actual_recorded_date)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                        &[
+                            &period_start,
+                            &category,
+                            &department,
+                            &forecast_dec,
+                            &actual_value,
+                            &variance,
+                            &variance_pct,
+                            &forecast_created,
+                            &actual_recorded_date,
+                        ],
+                    )
+                    .map_err(|e| format!("Failed to insert rolling forecast for {} {}: {}", category, period_start, e))?;
+                
+                inserted += 1;
+            }
+        }
+    }
+    
+    Ok(inserted)
+}
+
 pub fn generate_kpi_actuals(client: &mut Client) -> Result<usize, String> {
     use chrono::Duration;
     use rand::Rng;
@@ -565,6 +708,10 @@ pub fn generate_all_fpa_data(client: &mut Client, fiscal_year: i32) -> Result<()
     // 8. Forecast Data
     let forecast_data_count = generate_forecast_data(client, fiscal_year)?;
     println!("Generated {} forecast data records", forecast_data_count);
+    
+    // 9. Rolling Forecasts
+    let rolling_forecast_count = generate_rolling_forecasts(client)?;
+    println!("Generated {} rolling forecast records", rolling_forecast_count);
     
     println!("FP&A data generation complete!");
     
