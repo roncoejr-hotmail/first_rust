@@ -456,6 +456,70 @@ pub struct AgeDemographic {
     pub avg_credit_score: f64,
 }
 
+// Maintenance Analytics Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MaintenanceAnalytics {
+    pub total_maintenance_records: i64,
+    pub total_maintenance_cost: f64,
+    pub average_maintenance_cost: f64,
+    pub vehicles_serviced: i64,
+    pub most_common_service: String,
+    pub maintenance_by_type: Vec<MaintenanceByType>,
+    pub maintenance_cost_trend: Vec<MaintenanceCostTrend>,
+    pub top_vehicles_by_cost: Vec<VehicleMaintenanceSummary>,
+    pub recent_maintenance: Vec<MaintenanceRecord>,
+    pub service_provider_stats: Vec<ServiceProviderStat>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MaintenanceByType {
+    pub service_type: String,
+    pub count: i32,
+    pub total_cost: f64,
+    pub average_cost: f64,
+    pub percentage: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MaintenanceCostTrend {
+    pub month: String,
+    pub total_cost: f64,
+    pub service_count: i32,
+    pub average_cost: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VehicleMaintenanceSummary {
+    pub vehicle_id: i32,
+    pub vin: String,
+    pub vehicle_info: String,
+    pub total_maintenance_cost: f64,
+    pub service_count: i32,
+    pub last_service_date: String,
+    pub last_service_type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MaintenanceRecord {
+    pub maintenance_id: i32,
+    pub vehicle_id: i32,
+    pub vehicle_info: String,
+    pub service_date: String,
+    pub service_type: String,
+    pub mileage_at_service: i32,
+    pub service_provider: String,
+    pub cost: f64,
+    pub description: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ServiceProviderStat {
+    pub service_provider: String,
+    pub service_count: i32,
+    pub total_cost: f64,
+    pub average_cost: f64,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -1337,6 +1401,267 @@ async fn get_customer_analytics(
     }))
 }
 
+// Handler for maintenance analytics
+async fn get_maintenance_analytics(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<MaintenanceAnalytics>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    // Get overall maintenance statistics
+    let stats_row = client
+        .query_one("
+            SELECT 
+                COUNT(*) as total_records,
+                COALESCE(SUM(cost), 0) as total_cost,
+                CASE 
+                    WHEN COUNT(*) > 0 THEN COALESCE(SUM(cost), 0) / COUNT(*)
+                    ELSE 0
+                END as avg_cost,
+                COUNT(DISTINCT vehicle_id) as vehicles_serviced
+            FROM maintenance_history
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Maintenance stats error: {}", e)))?;
+    
+    let total_maintenance_records: i64 = stats_row.get(0);
+    let cost_decimal: Decimal = stats_row.get(1);
+    let total_maintenance_cost: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
+    let avg_decimal: Decimal = stats_row.get(2);
+    let average_maintenance_cost: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+    let vehicles_serviced: i64 = stats_row.get(3);
+    
+    // Get most common service type
+    let common_service_row = client
+        .query_opt("
+            SELECT service_type
+            FROM maintenance_history
+            WHERE service_type IS NOT NULL
+            GROUP BY service_type
+            ORDER BY COUNT(*) DESC
+            LIMIT 1
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Common service error: {}", e)))?;
+    
+    let most_common_service: String = common_service_row
+        .as_ref()
+        .map(|row| row.get::<_, String>(0))
+        .unwrap_or_else(|| "N/A".to_string());
+    
+    // Get maintenance by service type
+    let type_rows = client
+        .query("
+            SELECT 
+                service_type,
+                COUNT(*) as count,
+                COALESCE(SUM(cost), 0) as total_cost,
+                COALESCE(AVG(cost), 0) as avg_cost,
+                (COUNT(*)::float / (SELECT COUNT(*) FROM maintenance_history)::float * 100) as percentage
+            FROM maintenance_history
+            WHERE service_type IS NOT NULL
+            GROUP BY service_type
+            ORDER BY count DESC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Maintenance by type error: {}", e)))?;
+    
+    let mut maintenance_by_type = Vec::new();
+    for row in type_rows {
+        let service_type: String = row.get(0);
+        let count: i64 = row.get(1);
+        let cost_decimal: Decimal = row.get(2);
+        let total_cost: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
+        let avg_decimal: Decimal = row.get(3);
+        let average_cost: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        let percentage: f64 = row.get(4);
+        
+        maintenance_by_type.push(MaintenanceByType {
+            service_type,
+            count: count as i32,
+            total_cost,
+            average_cost,
+            percentage,
+        });
+    }
+    
+    // Get maintenance cost trend (all historical data)
+    let trend_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(service_date, 'YYYY-MM') as month,
+                COALESCE(SUM(cost), 0) as total_cost,
+                COUNT(*) as service_count,
+                COALESCE(AVG(cost), 0) as avg_cost
+            FROM maintenance_history
+            GROUP BY TO_CHAR(service_date, 'YYYY-MM')
+            ORDER BY month ASC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Cost trend error: {}", e)))?;
+    
+    let mut maintenance_cost_trend = Vec::new();
+    for row in trend_rows {
+        let month: String = row.get(0);
+        let cost_decimal: Decimal = row.get(1);
+        let total_cost: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
+        let service_count: i64 = row.get(2);
+        let avg_decimal: Decimal = row.get(3);
+        let average_cost: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        
+        maintenance_cost_trend.push(MaintenanceCostTrend {
+            month,
+            total_cost,
+            service_count: service_count as i32,
+            average_cost,
+        });
+    }
+    
+    // Get top vehicles by maintenance cost
+    let vehicle_rows = client
+        .query("
+            SELECT 
+                v.vehicle_id,
+                v.vin,
+                v.year || ' ' || v.make || ' ' || v.model as vehicle_info,
+                COALESCE(SUM(m.cost), 0) as total_cost,
+                COUNT(m.maintenance_id) as service_count,
+                MAX(m.service_date) as last_service_date,
+                (
+                    SELECT service_type 
+                    FROM maintenance_history 
+                    WHERE vehicle_id = v.vehicle_id 
+                    ORDER BY service_date DESC 
+                    LIMIT 1
+                ) as last_service_type
+            FROM vehicles v
+            LEFT JOIN maintenance_history m ON v.vehicle_id = m.vehicle_id
+            GROUP BY v.vehicle_id, v.vin, v.year, v.make, v.model
+            HAVING COUNT(m.maintenance_id) > 0
+            ORDER BY total_cost DESC
+            LIMIT 10
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Top vehicles error: {}", e)))?;
+    
+    let mut top_vehicles_by_cost = Vec::new();
+    for row in vehicle_rows {
+        let vehicle_id: i32 = row.get(0);
+        let vin: String = row.get(1);
+        let vehicle_info: String = row.get(2);
+        let cost_decimal: Decimal = row.get(3);
+        let total_maintenance_cost: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
+        let service_count: i64 = row.get(4);
+        let last_service_date: chrono::NaiveDate = row.get(5);
+        let last_service_type: String = row.get(6);
+        
+        top_vehicles_by_cost.push(VehicleMaintenanceSummary {
+            vehicle_id,
+            vin,
+            vehicle_info,
+            total_maintenance_cost,
+            service_count: service_count as i32,
+            last_service_date: last_service_date.to_string(),
+            last_service_type,
+        });
+    }
+    
+    // Get recent maintenance records
+    let recent_rows = client
+        .query("
+            SELECT 
+                m.maintenance_id,
+                m.vehicle_id,
+                v.year || ' ' || v.make || ' ' || v.model as vehicle_info,
+                m.service_date,
+                m.service_type,
+                m.mileage_at_service,
+                m.service_provider,
+                m.cost,
+                COALESCE(m.description, '') as description
+            FROM maintenance_history m
+            JOIN vehicles v ON m.vehicle_id = v.vehicle_id
+            ORDER BY m.service_date DESC
+            LIMIT 20
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Recent maintenance error: {}", e)))?;
+    
+    let mut recent_maintenance = Vec::new();
+    for row in recent_rows {
+        let maintenance_id: i32 = row.get(0);
+        let vehicle_id: i32 = row.get(1);
+        let vehicle_info: String = row.get(2);
+        let service_date: chrono::NaiveDate = row.get(3);
+        let service_type: String = row.get(4);
+        let mileage_at_service: i32 = row.get(5);
+        let service_provider: String = row.get(6);
+        let cost_decimal: Decimal = row.get(7);
+        let cost: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
+        let description: String = row.get(8);
+        
+        recent_maintenance.push(MaintenanceRecord {
+            maintenance_id,
+            vehicle_id,
+            vehicle_info,
+            service_date: service_date.to_string(),
+            service_type,
+            mileage_at_service,
+            service_provider,
+            cost,
+            description,
+        });
+    }
+    
+    // Get service provider statistics
+    let provider_rows = client
+        .query("
+            SELECT 
+                service_provider,
+                COUNT(*) as service_count,
+                COALESCE(SUM(cost), 0) as total_cost,
+                COALESCE(AVG(cost), 0) as avg_cost
+            FROM maintenance_history
+            WHERE service_provider IS NOT NULL AND service_provider != ''
+            GROUP BY service_provider
+            ORDER BY total_cost DESC
+            LIMIT 10
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Service provider error: {}", e)))?;
+    
+    let mut service_provider_stats = Vec::new();
+    for row in provider_rows {
+        let service_provider: String = row.get(0);
+        let service_count: i64 = row.get(1);
+        let cost_decimal: Decimal = row.get(2);
+        let total_cost: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
+        let avg_decimal: Decimal = row.get(3);
+        let average_cost: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        
+        service_provider_stats.push(ServiceProviderStat {
+            service_provider,
+            service_count: service_count as i32,
+            total_cost,
+            average_cost,
+        });
+    }
+    
+    Ok(Json(MaintenanceAnalytics {
+        total_maintenance_records,
+        total_maintenance_cost,
+        average_maintenance_cost,
+        vehicles_serviced,
+        most_common_service,
+        maintenance_by_type,
+        maintenance_cost_trend,
+        top_vehicles_by_cost,
+        recent_maintenance,
+        service_provider_stats,
+    }))
+}
+
 // Health check endpoint
 async fn health_check() -> &'static str {
     "OK"
@@ -1353,5 +1678,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/api/dashboard/inventory", get(get_inventory_overview))
         .route("/api/dashboard/finance", get(get_finance_overview))
         .route("/api/dashboard/customers", get(get_customer_analytics))
+        .route("/api/dashboard/maintenance", get(get_maintenance_analytics))
         .with_state(state)
 }

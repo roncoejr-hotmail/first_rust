@@ -5,11 +5,13 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import PeopleIcon from '@mui/icons-material/People';
+import BuildIcon from '@mui/icons-material/Build';
 import ExecutiveDashboard from './pages/ExecutiveDashboard';
 import SalesPerformanceDashboard from './pages/SalesPerformanceDashboard';
 import InventoryDashboard from './pages/InventoryDashboard';
 import FinanceDashboard from './pages/FinanceDashboard';
 import CustomerDashboard from './pages/CustomerDashboard';
+import MaintenanceDashboard from './pages/MaintenanceDashboard';
 
 const theme = createTheme({
   palette: {
@@ -91,6 +93,17 @@ function Navigation() {
           >
             Customers
           </Button>
+          <Button
+            color="inherit"
+            component={Link}
+            to="/maintenance"
+            startIcon={<BuildIcon />}
+            sx={{
+              backgroundColor: location.pathname === '/maintenance' ? 'rgba(255,255,255,0.2)' : 'transparent',
+            }}
+          >
+            Maintenance
+          </Button>
         </Box>
       </Toolbar>
     </AppBar>
@@ -109,6 +122,7 @@ function App() {
           <Route path="/inventory" element={<InventoryDashboard />} />
           <Route path="/finance" element={<FinanceDashboard />} />
           <Route path="/customers" element={<CustomerDashboard />} />
+          <Route path="/maintenance" element={<MaintenanceDashboard />} />
         </Routes>
       </Router>
     </ThemeProvider>
