@@ -66,7 +66,7 @@ async fn main() {
     //
     //
     match env::var("db_dir") {
-        Ok(path) => println!("SQLite DB location: {}", path),
+        Ok(path) => println!("If doing local development, SQLite DB location: {}", path),
         Err(e) => println!("{}", e),
     }
 
