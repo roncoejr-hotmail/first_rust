@@ -8,12 +8,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use fake::{Fake, Faker};
-use fake::faker::automotive::en::*;
-use fake::faker::name::en::*;
-use fake::faker::address::en::*;
-use fake::faker::company::en::*;
-use fake::faker::lorem::en::*;
-use fake::faker::chrono::en::*;
 
 
 //
@@ -430,23 +424,32 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
     let mut inserted = 0;
     let query = "INSERT INTO vehicles (vin, make, model, year, color, mileage, condition, vehicle_type, cost_price, list_price, status, date_acquired, description) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)";
     
+    let makes = vec!["Toyota", "Honda", "Ford", "Chevrolet", "BMW", "Mercedes", "Audi", "Volkswagen", "Nissan", "Hyundai"];
+    let models = vec!["Camry", "Accord", "F-150", "Silverado", "3 Series", "C-Class", "A4", "Jetta", "Altima", "Elantra"];
+    let colors = vec!["Black", "White", "Silver", "Gray", "Red", "Blue", "Green", "Brown"];
+    let vehicle_types = vec!["Sedan", "SUV", "Truck", "Coupe", "Hatchback"];
+    
     for _ in 0..count {
-        let vin: String = VIN().fake();
-        let make: String = Make().fake();
-        let model: String = Model().fake();
+        let vin: String = (0..17).map(|_| {
+            let chars = "ABCDEFGHJKLMNPRSTUVWXYZ0123456789";
+            let idx: usize = (0..chars.len()).fake::<usize>();
+            chars.chars().nth(idx).unwrap()
+        }).collect();
+        let make: &str = makes[(0..makes.len()).fake::<usize>()];
+        let model: &str = models[(0..models.len()).fake::<usize>()];
         let year: i32 = (2010..2025).fake::<i32>();
-        let color: String = Color().fake();
+        let color: &str = colors[(0..colors.len()).fake::<usize>()];
         let mileage: i32 = (0..150000).fake::<i32>();
         let condition = if mileage == 0 { "New" } else if mileage < 50000 { "Certified Pre-owned" } else { "Used" };
-        let vehicle_type: String = VehicleType().fake();
+        let vehicle_type: &str = vehicle_types[(0..vehicle_types.len()).fake::<usize>()];
         let cost_price: f64 = (15000.0..60000.0).fake::<f64>();
         let list_price = cost_price * 1.15;
         let status = if (0..2).fake::<i32>() == 0 { "available" } else { "pending" };
-        let date_acquired: String = Date().fake();
-        let description: String = Sentence(5..10).fake();
+        let date_acquired: String = format!("{}-{:02}-{:02}", (2020..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
+        let description: String = format!("Vehicle description {}", Faker.fake::<String>());
         
         client.execute(query, &[
-            &vin, &make, &model, &year, &color, &mileage, &condition, &vehicle_type,
+            &vin, make, model, &year, color, &mileage, &condition, vehicle_type,
             &(cost_price as f32), &(list_price as f32), &status, &date_acquired, &description
         ]).map_err(|e| format!("Failed to insert vehicle: {}", e))?;
         
@@ -470,15 +473,15 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
     let query = "INSERT INTO customers (first_name, last_name, email, phone, address, city, state, zip_code, date_of_birth, credit_score) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)";
     
     for _ in 0..count {
-        let first_name: String = FirstName().fake();
-        let last_name: String = LastName().fake();
-        let email: String = FreeEmail().fake();
-        let phone: String = PhoneNumber().fake();
-        let address: String = StreetAddress().fake();
-        let city: String = City().fake();
-        let state: String = StateAbbr().fake();
-        let zip_code: String = ZipCode().fake();
-        let date_of_birth: String = Date().fake();
+        let first_name: String = Faker.fake::<String>();
+        let last_name: String = Faker.fake::<String>();
+        let email: String = format!("{}.{}@{}.com", Faker.fake::<String>(), Faker.fake::<String>(), Faker.fake::<String>());
+        let phone: String = format!("{}-{}-{}", (100..1000).fake::<i32>(), (100..1000).fake::<i32>(), (1000..10000).fake::<i32>());
+        let address: String = format!("{} {}", (1..9999).fake::<i32>(), Faker.fake::<String>());
+        let city: String = Faker.fake::<String>();
+        let state: String = format!("{}", Faker.fake::<char>()).repeat(2).to_uppercase();
+        let zip_code: String = format!("{}", (10000..99999).fake::<i32>());
+        let date_of_birth: String = format!("{}-{:02}-{:02}", (1950..2000).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
         let credit_score: i32 = (300..850).fake::<i32>();
         
         client.execute(query, &[
@@ -507,13 +510,13 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
     let query = "INSERT INTO employees (first_name, last_name, email, phone, role, hire_date, commission_rate, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)";
     
     for _ in 0..count {
-        let first_name: String = FirstName().fake();
-        let last_name: String = LastName().fake();
-        let email: String = FreeEmail().fake();
-        let phone: String = PhoneNumber().fake();
+        let first_name: String = Faker.fake::<String>();
+        let last_name: String = Faker.fake::<String>();
+        let email: String = format!("{}.{}@{}.com", Faker.fake::<String>(), Faker.fake::<String>(), Faker.fake::<String>());
+        let phone: String = format!("{}-{}-{}", (100..1000).fake::<i32>(), (100..1000).fake::<i32>(), (1000..10000).fake::<i32>());
         let role_idx: usize = (0..roles.len()).fake::<usize>();
         let role = roles[role_idx];
-        let hire_date: String = Date().fake();
+        let hire_date: String = format!("{}-{:02}-{:02}", (2015..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
         let commission_rate: f64 = match role {
             "Salesperson" => (2.0..5.0).fake::<f64>(),
             "Finance Manager" => (1.0..3.0).fake::<f64>(),
