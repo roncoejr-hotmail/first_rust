@@ -520,6 +520,12 @@ pub fn generate_rolling_forecasts(client: &mut Client) -> Result<usize, String> 
                 };
                 
                 // Insert rolling forecast
+                // Convert Option<Decimal> to Option<&Decimal> for PostgreSQL
+                let actual_ref = actual_value.as_ref();
+                let variance_ref = variance.as_ref();
+                let variance_pct_ref = variance_pct.as_ref();
+                let actual_date_ref = actual_recorded_date.as_ref();
+                
                 client
                     .execute(
                         "INSERT INTO rolling_forecasts 
@@ -532,11 +538,11 @@ pub fn generate_rolling_forecasts(client: &mut Client) -> Result<usize, String> 
                             &category,
                             &department,
                             &forecast_dec,
-                            &actual_value,
-                            &variance,
-                            &variance_pct,
+                            &actual_ref,
+                            &variance_ref,
+                            &variance_pct_ref,
                             &forecast_created,
-                            &actual_recorded_date,
+                            &actual_date_ref,
                         ],
                     )
                     .map_err(|e| format!("Failed to insert rolling forecast for {} {}: {}", category, period_start, e))?;
