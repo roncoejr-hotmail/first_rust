@@ -754,7 +754,7 @@ pub fn generate_sample_loans(client: &mut postgres::Client) -> Result<usize, Str
         client.execute(query, &[
             &sale_id, &loan_amount_decimal, &interest_rate_decimal, &term_months, &monthly_payment_decimal,
             &loan_start_date, &loan_status_str, &remaining_balance_decimal
-        ]).map_err(|e| format!("Failed to insert loan: {}", e))?;
+        ]).map_err(|e| format!("Failed to insert loan (sale_id={}, amount={:.2}): {:?}", sale_id, loan_amount, e))?;
         
         inserted += 1;
     }
@@ -863,12 +863,19 @@ pub fn generate_sample_maintenance_history(client: &mut postgres::Client, count:
                 _ => (50.0..300.0).fake::<f64>(),
             };
             
-            let service_date: String = format!("{}-{:02}-{:02}", (2022..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
+            let service_year: i32 = (2022..2024).fake::<i32>();
+            let service_month: i32 = (1..13).fake::<i32>();
+            let service_day: i32 = (1..29).fake::<i32>();
+            let service_date = NaiveDate::from_ymd_opt(service_year, service_month as u32, service_day as u32).unwrap();
             let description = format!("{} service performed", service_type);
             
+            let cost_decimal = Decimal::from_str(&format!("{:.2}", cost)).unwrap();
+            let service_type_str: &str = &service_type;
+            let service_provider_str: &str = &service_provider;
+            
             client.execute(query, &[
-                &vehicle_id, &service_date, &service_type, &mileage_at_service,
-                &service_provider, &cost, &description
+                &vehicle_id, &service_date, &service_type_str, &mileage_at_service,
+                &service_provider_str, &cost_decimal, &description
             ]).map_err(|e| format!("Failed to insert maintenance record: {}", e))?;
             
             inserted += 1;
