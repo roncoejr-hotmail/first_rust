@@ -723,9 +723,11 @@ pub fn generate_sample_loans(client: &mut postgres::Client) -> Result<usize, Str
     
     for row in sales_rows {
         let sale_id: i32 = row.get(0);
-        let sale_price: f64 = row.get::<_, f32>(1) as f64;
-        let down_payment: f64 = row.get::<_, f32>(2) as f64;
-        let sale_date: String = row.get(3);
+        let sale_price_decimal: Decimal = row.get(1);
+        let sale_price: f64 = sale_price_decimal.to_string().parse().unwrap();
+        let down_payment_decimal: Decimal = row.get(2);
+        let down_payment: f64 = down_payment_decimal.to_string().parse().unwrap();
+        let sale_date: NaiveDate = row.get(3);
         
         let loan_amount = sale_price - down_payment;
         let interest_rate: f64 = (3.0..8.0).fake::<f64>();
@@ -739,13 +741,19 @@ pub fn generate_sample_loans(client: &mut postgres::Client) -> Result<usize, Str
             loan_amount / term_months as f64
         };
         
-        let loan_start_date = sale_date.clone();
+        let loan_start_date = sale_date;
         let loan_status: String = "active".to_string();
         let remaining_balance = loan_amount;
         
+        let loan_amount_decimal = Decimal::from_str(&format!("{:.2}", loan_amount)).unwrap();
+        let interest_rate_decimal = Decimal::from_str(&format!("{:.2}", interest_rate)).unwrap();
+        let monthly_payment_decimal = Decimal::from_str(&format!("{:.2}", monthly_payment)).unwrap();
+        let remaining_balance_decimal = Decimal::from_str(&format!("{:.2}", remaining_balance)).unwrap();
+        let loan_status_str: &str = &loan_status;
+        
         client.execute(query, &[
-            &sale_id, &loan_amount, &interest_rate, &term_months, &monthly_payment,
-            &loan_start_date, &loan_status, &remaining_balance
+            &sale_id, &loan_amount_decimal, &interest_rate_decimal, &term_months, &monthly_payment_decimal,
+            &loan_start_date, &loan_status_str, &remaining_balance_decimal
         ]).map_err(|e| format!("Failed to insert loan: {}", e))?;
         
         inserted += 1;
