@@ -70,7 +70,34 @@ async fn main() {
         Err(e) => println!("{}", e),
     }
 
-    // First pass: collect table name, db-name, --populate, --count, and check for --db-pgsql
+    // First pass: check for --serve FIRST before anything else
+    for (idx, arg) in args.iter().enumerate() {
+        if arg == "--serve" {
+            // Get db-name from args
+            let mut serve_db_name = String::from("postgres");
+            for i in 1..args.len() {
+                if args[i] == "--db-name" && i + 1 < args.len() {
+                    serve_db_name = args[i + 1].clone();
+                    break;
+                }
+            }
+            
+            // Get port from args (can be after --serve or use default)
+            let port: u16 = if idx + 1 < args.len() {
+                args[idx + 1].parse().unwrap_or(3000)
+            } else {
+                3000
+            };
+            
+            println!("🚀 Starting API server...");
+            println!("📊 Database: {}", serve_db_name);
+            println!("🔌 Port: {}", port);
+            server::run_server(serve_db_name, port).await;
+            return;
+        }
+    }
+    
+    // Second pass: collect table name, db-name, --populate, --count, and check for --db-pgsql
     let mut j: usize = 1;
     while j < args.len() {
         if j < args.len() - 1 && args[j] == "--table" {
@@ -95,21 +122,11 @@ async fn main() {
         } else if args[j] == "--generate-sample-data" {
             generate_sample_data = true;
             println!("{}", args[j]);
-        } else if args[j] == "--serve" {
-            // Start API server
-            let db = db_name.clone().unwrap_or_else(|| "postgres".to_string());
-            let port: u16 = if j < args.len() - 1 {
-                args[j + 1].parse().unwrap_or(3000)
-            } else {
-                3000
-            };
-            server::run_server(db, port).await;
-            return;
         }
         j += 1;
     }
 
-    // Second pass: process other arguments
+    // Third pass: process other arguments
     while i < args.len() {
         //
         //
