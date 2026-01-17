@@ -2662,7 +2662,7 @@ async fn get_kpi_scorecard(
             ORDER BY kd.category, kd.kpi_name
         ", &[])
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("KPI definitions error: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("KPI definitions error: {:?}", e)))?;
     
     let mut kpi_details = Vec::new();
     let mut total_kpis = 0;
@@ -2682,8 +2682,8 @@ async fn get_kpi_scorecard(
         let target_value: f64 = target_decimal.to_string().parse().unwrap_or(0.0);
         let is_higher_better: bool = row.get(7);
         
-        // Get most recent actual value for this KPI
-        let actual_result = client
+        // Get most recent actual value for this KPI (may not exist yet)
+        let current_value = match client
             .query_opt("
                 SELECT actual_value
                 FROM kpi_actuals
@@ -2691,15 +2691,14 @@ async fn get_kpi_scorecard(
                 ORDER BY period_date DESC
                 LIMIT 1
             ", &[&kpi_id])
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("KPI actuals error: {}", e)))?;
-        
-        let current_value = if let Some(actual_row) = actual_result {
-            let value_decimal: Decimal = actual_row.get(0);
-            value_decimal.to_string().parse().unwrap_or(0.0)
-        } else {
-            0.0
-        };
+            .await {
+                Ok(Some(actual_row)) => {
+                    let value_decimal: Decimal = actual_row.get(0);
+                    value_decimal.to_string().parse().unwrap_or(0.0)
+                },
+                Ok(None) => 0.0, // No actuals yet
+                Err(_) => 0.0, // Table might not exist or other error
+            };
         
         // Calculate achievement percentage
         let achievement_percentage = if target_value != 0.0 {
@@ -2786,8 +2785,8 @@ async fn get_kpi_scorecard(
         });
     }
     
-    // Get KPI trends (last 12 periods for each KPI)
-    let trend_rows = client
+    // Get KPI trends (last 12 periods for each KPI) - may be empty if no actuals yet
+    let kpi_trends = match client
         .query("
             SELECT 
                 ka.kpi_id,
@@ -2800,29 +2799,32 @@ async fn get_kpi_scorecard(
             WHERE ka.period_date >= CURRENT_DATE - INTERVAL '12 months'
             ORDER BY ka.kpi_id, ka.period_date
         ", &[])
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Trend error: {}", e)))?;
-    
-    let mut kpi_trends = Vec::new();
-    for row in trend_rows {
-        let kpi_id: i32 = row.get(0);
-        let kpi_name: String = row.get(1);
-        let period: String = row.get(2);
-        let target_decimal: Decimal = row.get(3);
-        let target: f64 = target_decimal.to_string().parse().unwrap_or(0.0);
-        let actual_decimal: Decimal = row.get(4);
-        let actual: f64 = actual_decimal.to_string().parse().unwrap_or(0.0);
-        let achievement = if target != 0.0 { (actual / target) * 100.0 } else { 0.0 };
-        
-        kpi_trends.push(KPITrend {
-            kpi_id,
-            kpi_name,
-            period,
-            target,
-            actual,
-            achievement,
-        });
-    }
+        .await {
+            Ok(trend_rows) => {
+                let mut trends = Vec::new();
+                for row in trend_rows {
+                    let kpi_id: i32 = row.get(0);
+                    let kpi_name: String = row.get(1);
+                    let period: String = row.get(2);
+                    let target_decimal: Decimal = row.get(3);
+                    let target: f64 = target_decimal.to_string().parse().unwrap_or(0.0);
+                    let actual_decimal: Decimal = row.get(4);
+                    let actual: f64 = actual_decimal.to_string().parse().unwrap_or(0.0);
+                    let achievement = if target != 0.0 { (actual / target) * 100.0 } else { 0.0 };
+                    
+                    trends.push(KPITrend {
+                        kpi_id,
+                        kpi_name,
+                        period,
+                        target,
+                        actual,
+                        achievement,
+                    });
+                }
+                trends
+            },
+            Err(_) => Vec::new(), // No trends yet or table doesn't exist
+        };
     
     Ok(Json(KPIScorecardOverview {
         total_kpis,
