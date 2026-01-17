@@ -10,4 +10,4 @@ postgres = "0.19"
 postgres-native-tls = "0.5"
 native-tls = "0.2"
 fake = { version = "2.8", default-features = false, features = ["derive"] }
-rust_decimal = "1.33"
+rust_decimal = { version = "1.33", features = ["db-postgres"] }

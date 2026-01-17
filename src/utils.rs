@@ -466,6 +466,15 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         // Convert DECIMAL values to rust_decimal::Decimal for PostgreSQL
         let cost_price_decimal = Decimal::from_str(&format!("{:.2}", cost_price)).unwrap();
         let list_price_decimal = Decimal::from_str(&format!("{:.2}", list_price)).unwrap();
+        
+        // Debug: print values to identify the issue
+        if inserted == 0 {
+            eprintln!("DEBUG: vehicle_type = '{}', len = {}", vehicle_type, vehicle_type.len());
+            eprintln!("DEBUG: cost_price = {}, cost_price_decimal = '{}'", cost_price, cost_price_decimal);
+        }
+        
+        // Convert all String parameters to &str for proper serialization
+        let vin_str: &str = &vin;
         let make_str: &str = &make;
         let model_str: &str = &model;
         let color_str: &str = &color;
