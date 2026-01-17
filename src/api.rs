@@ -1239,7 +1239,7 @@ async fn get_customer_analytics(
         });
     }
     
-    // Get customer acquisition trend (last 12 months)
+    // Get customer acquisition trend (all historical data)
     let acquisition_rows = client
         .query("
             SELECT 
@@ -1249,10 +1249,8 @@ async fn get_customer_analytics(
             FROM customers c
             LEFT JOIN sales s ON c.customer_id = s.customer_id 
                 AND DATE_TRUNC('month', s.sale_date) = DATE_TRUNC('month', c.created_at)
-            WHERE c.created_at >= CURRENT_DATE - INTERVAL '12 months'
             GROUP BY TO_CHAR(c.created_at, 'YYYY-MM')
-            ORDER BY month DESC
-            LIMIT 12
+            ORDER BY month ASC
         ", &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Acquisition trend query error: {}", e)))?;
@@ -1270,7 +1268,6 @@ async fn get_customer_analytics(
             total_purchases,
         });
     }
-    customer_acquisition_trend.reverse();
     
     // Get age demographics
     let age_rows = client
