@@ -751,6 +751,70 @@ pub struct VarianceDetail {
     pub variance_percentage: f64,
 }
 
+// Variance Analysis Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VarianceAnalysisOverview {
+    pub fiscal_year: i32,
+    pub total_budget: f64,
+    pub total_actual: f64,
+    pub total_variance: f64,
+    pub variance_percentage: f64,
+    pub waterfall_data: Vec<WaterfallItem>,
+    pub variance_by_category: Vec<CategoryVariance>,
+    pub variance_trend: Vec<MonthlyVariance>,
+    pub top_favorable_variances: Vec<VarianceItem>,
+    pub top_unfavorable_variances: Vec<VarianceItem>,
+    pub variance_by_department: Vec<DepartmentVariance>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WaterfallItem {
+    pub label: String,
+    pub value: f64,
+    pub cumulative: f64,
+    pub item_type: String, // 'start', 'increase', 'decrease', 'total'
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CategoryVariance {
+    pub category: String,
+    pub budgeted: f64,
+    pub actual: f64,
+    pub variance: f64,
+    pub variance_percentage: f64,
+    pub is_favorable: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MonthlyVariance {
+    pub month: String,
+    pub budgeted: f64,
+    pub actual: f64,
+    pub variance: f64,
+    pub cumulative_variance: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VarianceItem {
+    pub category: String,
+    pub subcategory: String,
+    pub department: String,
+    pub month: String,
+    pub budgeted: f64,
+    pub actual: f64,
+    pub variance: f64,
+    pub variance_percentage: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DepartmentVariance {
+    pub department: String,
+    pub budgeted: f64,
+    pub actual: f64,
+    pub variance: f64,
+    pub variance_percentage: f64,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -2525,6 +2589,319 @@ async fn get_financial_forecast(
     }))
 }
 
+// Handler for variance analysis dashboard
+async fn get_variance_analysis(
+    State(state): State<Arc<AppState>>,
+    Query(filters): Query<DateRangeFilter>,
+) -> Result<Json<VarianceAnalysisOverview>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    let fiscal_year = 2023;
+    
+    // Get overall summary
+    let summary_row = client
+        .query_one("
+            SELECT 
+                COALESCE(SUM(b.budgeted_amount), 0) as total_budget,
+                COALESCE(SUM(a.actual_amount), 0) as total_actual
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Summary error: {}", e)))?;
+    
+    let budget_decimal: Decimal = summary_row.get(0);
+    let total_budget: f64 = budget_decimal.to_string().parse().unwrap_or(0.0);
+    let actual_decimal: Decimal = summary_row.get(1);
+    let total_actual: f64 = actual_decimal.to_string().parse().unwrap_or(0.0);
+    let total_variance = total_actual - total_budget;
+    let variance_percentage = if total_budget > 0.0 {
+        (total_variance / total_budget) * 100.0
+    } else {
+        0.0
+    };
+    
+    // Get variance by category for waterfall
+    let category_rows = client
+        .query("
+            SELECT 
+                b.category,
+                COALESCE(SUM(b.budgeted_amount), 0) as budgeted,
+                COALESCE(SUM(a.actual_amount), 0) as actual,
+                COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) as variance
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+            GROUP BY b.category
+            ORDER BY ABS(COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0)) DESC
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Category error: {}", e)))?;
+    
+    let mut variance_by_category = Vec::new();
+    let mut waterfall_data = Vec::new();
+    
+    // Start waterfall with budget
+    waterfall_data.push(WaterfallItem {
+        label: "Budget".to_string(),
+        value: total_budget,
+        cumulative: total_budget,
+        item_type: "start".to_string(),
+    });
+    
+    let mut cumulative = total_budget;
+    
+    for row in category_rows {
+        let category: String = row.get(0);
+        let budgeted_dec: Decimal = row.get(1);
+        let budgeted: f64 = budgeted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(2);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let variance_dec: Decimal = row.get(3);
+        let variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+        let variance_pct = if budgeted > 0.0 { (variance / budgeted) * 100.0 } else { 0.0 };
+        
+        let is_favorable = variance < 0.0; // Under budget is favorable
+        
+        variance_by_category.push(CategoryVariance {
+            category: category.clone(),
+            budgeted,
+            actual,
+            variance,
+            variance_percentage: variance_pct,
+            is_favorable,
+        });
+        
+        // Add to waterfall
+        cumulative += variance;
+        waterfall_data.push(WaterfallItem {
+            label: category,
+            value: variance,
+            cumulative,
+            item_type: if variance > 0.0 { "increase".to_string() } else { "decrease".to_string() },
+        });
+    }
+    
+    // End waterfall with actual
+    waterfall_data.push(WaterfallItem {
+        label: "Actual".to_string(),
+        value: total_actual,
+        cumulative: total_actual,
+        item_type: "total".to_string(),
+    });
+    
+    // Monthly variance trend
+    let monthly_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(TO_DATE(b.fiscal_year::text || '-' || LPAD(b.fiscal_month::text, 2, '0'), 'YYYY-MM'), 'YYYY-MM') as month,
+                COALESCE(SUM(b.budgeted_amount), 0) as budgeted,
+                COALESCE(SUM(a.actual_amount), 0) as actual,
+                COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) as variance
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+            GROUP BY b.fiscal_year, b.fiscal_month
+            ORDER BY b.fiscal_month
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Monthly error: {}", e)))?;
+    
+    let mut variance_trend = Vec::new();
+    let mut cumulative_variance = 0.0;
+    
+    for row in monthly_rows {
+        let month: String = row.get(0);
+        let budgeted_dec: Decimal = row.get(1);
+        let budgeted: f64 = budgeted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(2);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let variance_dec: Decimal = row.get(3);
+        let variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+        
+        cumulative_variance += variance;
+        
+        variance_trend.push(MonthlyVariance {
+            month,
+            budgeted,
+            actual,
+            variance,
+            cumulative_variance,
+        });
+    }
+    
+    // Top favorable variances (under budget)
+    let favorable_rows = client
+        .query("
+            SELECT 
+                b.category,
+                COALESCE(b.subcategory, 'N/A') as subcategory,
+                b.department,
+                TO_CHAR(TO_DATE(b.fiscal_year::text || '-' || LPAD(b.fiscal_month::text, 2, '0'), 'YYYY-MM'), 'YYYY-MM') as month,
+                COALESCE(SUM(b.budgeted_amount), 0) as budgeted,
+                COALESCE(SUM(a.actual_amount), 0) as actual,
+                COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) as variance
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category AND
+                COALESCE(b.subcategory, '') = COALESCE(a.subcategory, '')
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+            GROUP BY b.category, b.subcategory, b.department, b.fiscal_year, b.fiscal_month
+            HAVING COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) < 0
+            ORDER BY COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) ASC
+            LIMIT 10
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Favorable error: {}", e)))?;
+    
+    let mut top_favorable_variances = Vec::new();
+    for row in favorable_rows {
+        let category: String = row.get(0);
+        let subcategory: String = row.get(1);
+        let department: String = row.get(2);
+        let month: String = row.get(3);
+        let budgeted_dec: Decimal = row.get(4);
+        let budgeted: f64 = budgeted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(5);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let variance_dec: Decimal = row.get(6);
+        let variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+        let variance_pct = if budgeted > 0.0 { (variance / budgeted) * 100.0 } else { 0.0 };
+        
+        top_favorable_variances.push(VarianceItem {
+            category,
+            subcategory,
+            department,
+            month,
+            budgeted,
+            actual,
+            variance,
+            variance_percentage: variance_pct,
+        });
+    }
+    
+    // Top unfavorable variances (over budget)
+    let unfavorable_rows = client
+        .query("
+            SELECT 
+                b.category,
+                COALESCE(b.subcategory, 'N/A') as subcategory,
+                b.department,
+                TO_CHAR(TO_DATE(b.fiscal_year::text || '-' || LPAD(b.fiscal_month::text, 2, '0'), 'YYYY-MM'), 'YYYY-MM') as month,
+                COALESCE(SUM(b.budgeted_amount), 0) as budgeted,
+                COALESCE(SUM(a.actual_amount), 0) as actual,
+                COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) as variance
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category AND
+                COALESCE(b.subcategory, '') = COALESCE(a.subcategory, '')
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+            GROUP BY b.category, b.subcategory, b.department, b.fiscal_year, b.fiscal_month
+            HAVING COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) > 0
+            ORDER BY COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) DESC
+            LIMIT 10
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Unfavorable error: {}", e)))?;
+    
+    let mut top_unfavorable_variances = Vec::new();
+    for row in unfavorable_rows {
+        let category: String = row.get(0);
+        let subcategory: String = row.get(1);
+        let department: String = row.get(2);
+        let month: String = row.get(3);
+        let budgeted_dec: Decimal = row.get(4);
+        let budgeted: f64 = budgeted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(5);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let variance_dec: Decimal = row.get(6);
+        let variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+        let variance_pct = if budgeted > 0.0 { (variance / budgeted) * 100.0 } else { 0.0 };
+        
+        top_unfavorable_variances.push(VarianceItem {
+            category,
+            subcategory,
+            department,
+            month,
+            budgeted,
+            actual,
+            variance,
+            variance_percentage: variance_pct,
+        });
+    }
+    
+    // Variance by department
+    let dept_rows = client
+        .query("
+            SELECT 
+                b.department,
+                COALESCE(SUM(b.budgeted_amount), 0) as budgeted,
+                COALESCE(SUM(a.actual_amount), 0) as actual,
+                COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) as variance
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category AND
+                COALESCE(b.department, '') = COALESCE(a.department, '')
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+            GROUP BY b.department
+            ORDER BY ABS(COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0)) DESC
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Department error: {}", e)))?;
+    
+    let mut variance_by_department = Vec::new();
+    for row in dept_rows {
+        let department: String = row.get(0);
+        let budgeted_dec: Decimal = row.get(1);
+        let budgeted: f64 = budgeted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(2);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let variance_dec: Decimal = row.get(3);
+        let variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+        let variance_pct = if budgeted > 0.0 { (variance / budgeted) * 100.0 } else { 0.0 };
+        
+        variance_by_department.push(DepartmentVariance {
+            department,
+            budgeted,
+            actual,
+            variance,
+            variance_percentage: variance_pct,
+        });
+    }
+    
+    Ok(Json(VarianceAnalysisOverview {
+        fiscal_year,
+        total_budget,
+        total_actual,
+        total_variance,
+        variance_percentage,
+        waterfall_data,
+        variance_by_category,
+        variance_trend,
+        top_favorable_variances,
+        top_unfavorable_variances,
+        variance_by_department,
+    }))
+}
+
 // Handler for budget management dashboard
 async fn get_budget_management(
     State(state): State<Arc<AppState>>,
@@ -2819,5 +3196,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/api/dashboard/employees", get(get_employee_performance))
         .route("/api/dashboard/forecasting", get(get_financial_forecast))
         .route("/api/fpa/budget-management", get(get_budget_management))
+        .route("/api/fpa/variance-analysis", get(get_variance_analysis))
         .with_state(state)
 }

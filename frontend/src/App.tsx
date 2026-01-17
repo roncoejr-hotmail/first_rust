@@ -42,6 +42,7 @@ import MaintenanceDashboard from './pages/MaintenanceDashboard';
 import EmployeeDashboard from './pages/EmployeeDashboard';
 import ForecastingDashboard from './pages/ForecastingDashboard';
 import BudgetManagementDashboard from './pages/BudgetManagementDashboard';
+import VarianceAnalysisDashboard from './pages/VarianceAnalysisDashboard';
 
 const theme = createTheme({
   palette: {
@@ -98,6 +99,7 @@ const navigationSections: NavSection[] = [
     icon: <AttachMoneyIcon />,
     items: [
       { label: 'Budget Management', path: '/fpa/budget', icon: <AttachMoneyIcon /> },
+      { label: 'Variance Analysis', path: '/fpa/variance', icon: <TrendingUpIcon /> },
     ],
   },
 ];
@@ -245,6 +247,7 @@ function App() {
               <Route path="/employees" element={<EmployeeDashboard />} />
               <Route path="/forecasting" element={<ForecastingDashboard />} />
               <Route path="/fpa/budget" element={<BudgetManagementDashboard />} />
+              <Route path="/fpa/variance" element={<VarianceAnalysisDashboard />} />
             </Routes>
           </Box>
         </Box>
