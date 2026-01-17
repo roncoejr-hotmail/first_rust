@@ -449,7 +449,7 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         let description: String = format!("Vehicle description {}", Faker.fake::<String>());
         
         client.execute(query, &[
-            &vin, make, model, &year, color, &mileage, &condition, vehicle_type,
+            &vin, &make, &model, &year, &color, &mileage, &condition, &vehicle_type,
             &(cost_price as f32), &(list_price as f32), &status, &date_acquired, &description
         ]).map_err(|e| format!("Failed to insert vehicle: {}", e))?;
         
