@@ -23,6 +23,10 @@ use utils::create_automotive_schema;
 use utils::generate_sample_vehicles;
 use utils::generate_sample_customers;
 use utils::generate_sample_employees;
+use utils::generate_sample_sales;
+use utils::generate_sample_loans;
+use utils::generate_sample_payments;
+use utils::generate_sample_maintenance_history;
 // use utils::open_sqlite_db;
 use dotenv::dotenv;
 
@@ -125,6 +129,26 @@ fn main() {
                     match generate_sample_employees(&mut pg_client, count / 4 + 1) {
                         Ok(n) => println!("Generated {} employees", n),
                         Err(e) => eprintln!("Error generating employees: {}", e),
+                    }
+                    // Generate sales (uses available vehicles, customers, and salespersons)
+                    match generate_sample_sales(&mut pg_client, count / 2) {
+                        Ok(n) => println!("Generated {} sales", n),
+                        Err(e) => eprintln!("Error generating sales: {}", e),
+                    }
+                    // Generate loans for financed sales
+                    match generate_sample_loans(&mut pg_client) {
+                        Ok(n) => println!("Generated {} loans", n),
+                        Err(e) => eprintln!("Error generating loans: {}", e),
+                    }
+                    // Generate payment history (last 6 months for each loan)
+                    match generate_sample_payments(&mut pg_client, 6) {
+                        Ok(n) => println!("Generated {} payment records", n),
+                        Err(e) => eprintln!("Error generating payments: {}", e),
+                    }
+                    // Generate maintenance history for vehicles
+                    match generate_sample_maintenance_history(&mut pg_client, count) {
+                        Ok(n) => println!("Generated {} maintenance records", n),
+                        Err(e) => eprintln!("Error generating maintenance history: {}", e),
                     }
                     1
                             },

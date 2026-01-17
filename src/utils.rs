@@ -534,3 +534,240 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
     
     Ok(inserted)
 }
+
+//
+//
+//
+//
+//
+pub fn generate_sample_sales(client: &mut postgres::Client, count: usize) -> Result<usize, String> {
+    //
+    //
+    //
+    //
+    let mut inserted = 0;
+    let query = "INSERT INTO sales (vehicle_id, customer_id, salesperson_id, sale_date, sale_price, down_payment, payment_method, sale_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING sale_id";
+    
+    // Get available vehicle IDs
+    let vehicle_rows = client.query("SELECT vehicle_id, list_price FROM vehicles WHERE status = 'available' LIMIT $1", &[&(count as i64)])
+        .map_err(|e| format!("Failed to get vehicles: {}", e))?;
+    
+    // Get customer IDs
+    let customer_rows = client.query("SELECT customer_id FROM customers LIMIT $1", &[&(count as i64)])
+        .map_err(|e| format!("Failed to get customers: {}", e))?;
+    
+    // Get employee IDs (salespersons only)
+    let employee_rows = client.query("SELECT employee_id FROM employees WHERE role = 'Salesperson' LIMIT 10", &[])
+        .map_err(|e| format!("Failed to get employees: {}", e))?;
+    
+    if vehicle_rows.is_empty() || customer_rows.is_empty() || employee_rows.is_empty() {
+        return Err("Not enough vehicles, customers, or salespersons to create sales".to_string());
+    }
+    
+    let payment_methods = vec!["Cash", "Finance", "Lease"];
+    
+    for i in 0..count.min(vehicle_rows.len()).min(customer_rows.len()) {
+        let vehicle_id: i32 = vehicle_rows[i].get(0);
+        let list_price: f32 = vehicle_rows[i].get(1);
+        let customer_id: i32 = customer_rows[i % customer_rows.len()].get(0);
+        let salesperson_idx: usize = (0..employee_rows.len()).fake::<usize>();
+        let salesperson_id: i32 = employee_rows[salesperson_idx].get(0);
+        
+        let sale_price = list_price * (0.85..1.0).fake::<f32>();
+        let payment_method_idx: usize = (0..payment_methods.len()).fake::<usize>();
+        let payment_method = payment_methods[payment_method_idx];
+        let down_payment = if payment_method == "Finance" || payment_method == "Lease" {
+            sale_price * (0.1..0.3).fake::<f32>()
+        } else {
+            0.0
+        };
+        let sale_date: String = format!("{}-{:02}-{:02}", (2023..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
+        let sale_status = "completed";
+        
+        let _row = client.query_one(query, &[
+            &vehicle_id, &customer_id, &salesperson_id, &sale_date,
+            &sale_price, &down_payment, payment_method, &sale_status
+        ]).map_err(|e| format!("Failed to insert sale: {}", e))?;
+        
+        // Update vehicle status to 'sold'
+        client.execute("UPDATE vehicles SET status = 'sold' WHERE vehicle_id = $1", &[&vehicle_id])
+            .map_err(|e| format!("Failed to update vehicle status: {}", e))?;
+        
+        inserted += 1;
+    }
+    
+    Ok(inserted)
+}
+
+//
+//
+//
+//
+//
+pub fn generate_sample_loans(client: &mut postgres::Client) -> Result<usize, String> {
+    //
+    //
+    //
+    //
+    let mut inserted = 0;
+    let query = "INSERT INTO loans (sale_id, loan_amount, interest_rate, term_months, monthly_payment, loan_start_date, loan_status, remaining_balance) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)";
+    
+    // Get sales that are financed (not cash)
+    let sales_rows = client.query("SELECT sale_id, sale_price, down_payment, sale_date FROM sales WHERE payment_method IN ('Finance', 'Lease')", &[])
+        .map_err(|e| format!("Failed to get sales: {}", e))?;
+    
+    for row in sales_rows {
+        let sale_id: i32 = row.get(0);
+        let sale_price: f64 = row.get::<_, f32>(1) as f64;
+        let down_payment: f64 = row.get::<_, f32>(2) as f64;
+        let sale_date: String = row.get(3);
+        
+        let loan_amount = sale_price - down_payment;
+        let interest_rate: f64 = (3.0..8.0).fake::<f64>();
+        let term_months: i32 = vec![36, 48, 60, 72][(0..4).fake::<usize>()];
+        
+        // Calculate monthly payment (simplified)
+        let monthly_rate = interest_rate / 100.0 / 12.0;
+        let monthly_payment = if monthly_rate > 0.0 {
+            loan_amount * (monthly_rate * (1.0 + monthly_rate).powi(term_months)) / ((1.0 + monthly_rate).powi(term_months) - 1.0)
+        } else {
+            loan_amount / term_months as f64
+        };
+        
+        let loan_start_date = sale_date.clone();
+        let loan_status = "active";
+        let remaining_balance = loan_amount;
+        
+        client.execute(query, &[
+            &sale_id, &loan_amount, &interest_rate, &term_months, &monthly_payment,
+            &loan_start_date, &loan_status, &remaining_balance
+        ]).map_err(|e| format!("Failed to insert loan: {}", e))?;
+        
+        inserted += 1;
+    }
+    
+    Ok(inserted)
+}
+
+//
+//
+//
+//
+//
+pub fn generate_sample_payments(client: &mut postgres::Client, months_back: i32) -> Result<usize, String> {
+    //
+    //
+    //
+    //
+    let mut inserted = 0;
+    let query = "INSERT INTO payments (loan_id, payment_date, payment_amount, payment_method, payment_status, principal_amount, interest_amount) VALUES ($1, $2, $3, $4, $5, $6, $7)";
+    
+    // Get active loans
+    let loan_rows = client.query("SELECT loan_id, monthly_payment, loan_start_date, remaining_balance FROM loans WHERE loan_status = 'active'", &[])
+        .map_err(|e| format!("Failed to get loans: {}", e))?;
+    
+    let payment_methods = vec!["ACH", "Check", "Credit Card", "Cash"];
+    
+    for row in loan_rows {
+        let loan_id: i32 = row.get(0);
+        let monthly_payment: f64 = row.get::<_, f32>(1) as f64;
+        let loan_start_date: String = row.get(2);
+        let remaining_balance: f64 = row.get::<_, f32>(3) as f64;
+        
+        // Parse start date
+        let date_parts: Vec<&str> = loan_start_date.split('-').collect();
+        if date_parts.len() != 3 {
+            continue;
+        }
+        let start_year: i32 = date_parts[0].parse().unwrap_or(2023);
+        let start_month: i32 = date_parts[1].parse().unwrap_or(1);
+        
+        // Generate payments for the last N months
+        for month_offset in 0..months_back {
+            let mut year = start_year;
+            let mut month = start_month + month_offset;
+            
+            while month > 12 {
+                month -= 12;
+                year += 1;
+            }
+            
+            let payment_date = format!("{}-{:02}-{:02}", year, month, 15);
+            
+            // Simple interest calculation (simplified)
+            let interest_amount = remaining_balance * 0.005;
+            let principal_amount = monthly_payment - interest_amount;
+            
+            let payment_method_idx: usize = (0..payment_methods.len()).fake::<usize>();
+            let payment_method = payment_methods[payment_method_idx];
+            let payment_status = "processed";
+            
+            client.execute(query, &[
+                &loan_id, &payment_date, &monthly_payment, payment_method, &payment_status,
+                &principal_amount, &interest_amount
+            ]).map_err(|e| format!("Failed to insert payment: {}", e))?;
+            
+            inserted += 1;
+        }
+    }
+    
+    Ok(inserted)
+}
+
+//
+//
+//
+//
+//
+pub fn generate_sample_maintenance_history(client: &mut postgres::Client, count: usize) -> Result<usize, String> {
+    //
+    //
+    //
+    //
+    let mut inserted = 0;
+    let query = "INSERT INTO maintenance_history (vehicle_id, service_date, service_type, mileage_at_service, service_provider, cost, description) VALUES ($1, $2, $3, $4, $5, $6, $7)";
+    
+    // Get vehicle IDs
+    let vehicle_rows = client.query("SELECT vehicle_id, mileage FROM vehicles LIMIT $1", &[&(count as i64)])
+        .map_err(|e| format!("Failed to get vehicles: {}", e))?;
+    
+    let service_types = vec!["Oil Change", "Tire Rotation", "Brake Service", "Inspection", "Repair", "Battery Replacement"];
+    let service_providers = vec!["Auto Service Center", "Quick Lube", "Dealership Service", "Independent Mechanic"];
+    
+    for row in vehicle_rows {
+        let vehicle_id: i32 = row.get(0);
+        let current_mileage: i32 = row.get(1);
+        
+        // Generate 1-3 service records per vehicle
+        let num_services: usize = (1..4).fake::<usize>();
+        
+        for _ in 0..num_services {
+            let service_type_idx: usize = (0..service_types.len()).fake::<usize>();
+            let service_type = service_types[service_type_idx];
+            let service_provider_idx: usize = (0..service_providers.len()).fake::<usize>();
+            let service_provider = service_providers[service_provider_idx];
+            
+            let mileage_at_service: i32 = (0..current_mileage).fake::<i32>();
+            let cost: f64 = match service_type {
+                "Oil Change" => (25.0..75.0).fake::<f64>(),
+                "Tire Rotation" => (20.0..50.0).fake::<f64>(),
+                "Brake Service" => (150.0..500.0).fake::<f64>(),
+                "Inspection" => (50.0..150.0).fake::<f64>(),
+                "Repair" => (200.0..2000.0).fake::<f64>(),
+                _ => (50.0..300.0).fake::<f64>(),
+            };
+            
+            let service_date: String = format!("{}-{:02}-{:02}", (2022..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
+            let description = format!("{} service performed", service_type);
+            
+            client.execute(query, &[
+                &vehicle_id, &service_date, service_type, &mileage_at_service,
+                service_provider, &(cost as f32), &description
+            ]).map_err(|e| format!("Failed to insert maintenance record: {}", e))?;
+            
+            inserted += 1;
+        }
+    }
+    
+    Ok(inserted)
+}
