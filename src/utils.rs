@@ -204,7 +204,11 @@ pub fn open_postgres_db(db_name: &str) -> postgres::Client {
     //
     //
     //
-    let client = postgres::Client::connect(&connection_string, postgres::NoTls)
+    let tls = native_tls::TlsConnector::builder()
+        .build()
+        .expect("Failed to create TLS connector");
+    let connector = postgres::tls::MakeTlsConnector::new(tls);
+    let client = postgres::Client::connect(&connection_string, connector)
         .expect("Failed to connect to PostgreSQL database");
     
     //
