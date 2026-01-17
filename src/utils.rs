@@ -586,7 +586,7 @@ pub fn generate_sample_sales(client: &mut postgres::Client, count: usize) -> Res
         
         let _row = client.query_one(query, &[
             &vehicle_id, &customer_id, &salesperson_id, &sale_date,
-            &sale_price, &down_payment, payment_method, &sale_status
+            &sale_price, &down_payment, &payment_method, &sale_status
         ]).map_err(|e| format!("Failed to insert sale: {}", e))?;
         
         // Update vehicle status to 'sold'
@@ -703,7 +703,7 @@ pub fn generate_sample_payments(client: &mut postgres::Client, months_back: i32)
             let payment_status = "processed";
             
             client.execute(query, &[
-                &loan_id, &payment_date, &monthly_payment, payment_method, &payment_status,
+                &loan_id, &payment_date, &monthly_payment, &payment_method, &payment_status,
                 &principal_amount, &interest_amount
             ]).map_err(|e| format!("Failed to insert payment: {}", e))?;
             
@@ -761,8 +761,8 @@ pub fn generate_sample_maintenance_history(client: &mut postgres::Client, count:
             let description = format!("{} service performed", service_type);
             
             client.execute(query, &[
-                &vehicle_id, &service_date, service_type, &mileage_at_service,
-                service_provider, &(cost as f32), &description
+                &vehicle_id, &service_date, &service_type, &mileage_at_service,
+                &service_provider, &(cost as f32), &description
             ]).map_err(|e| format!("Failed to insert maintenance record: {}", e))?;
             
             inserted += 1;
