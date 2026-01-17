@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use fake::{Fake, Faker};
+use rust_decimal::Decimal;
+use std::str::FromStr;
 
 
 //
@@ -461,8 +463,9 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
             eprintln!("DEBUG: cost_price = {}, cost_price_str = '{}'", cost_price, cost_price_str);
         }
         
-        // Convert all String parameters to &str for proper serialization
-        let vin_str: &str = &vin;
+        // Convert DECIMAL values to rust_decimal::Decimal for PostgreSQL
+        let cost_price_decimal = Decimal::from_str(&format!("{:.2}", cost_price)).unwrap();
+        let list_price_decimal = Decimal::from_str(&format!("{:.2}", list_price)).unwrap();
         let make_str: &str = &make;
         let model_str: &str = &model;
         let color_str: &str = &color;
@@ -474,7 +477,7 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         
         let result = client.query(query, &[
             &vin_str, &make_str, &model_str, &year, &color_str, &mileage,
-            &condition_str, &vehicle_type_str, &cost_price_str, &list_price_str,
+            &condition_str, &vehicle_type_str, &cost_price_decimal, &list_price_decimal,
             &status_str, &date_acquired_str, &description_str
         ]);
         
@@ -590,13 +593,13 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         };
         let is_active: bool = true;
         
-        // Convert DECIMAL value to string for PostgreSQL
-        let commission_rate_str = format!("{:.2}", commission_rate);
+        // Convert DECIMAL value to rust_decimal::Decimal for PostgreSQL
+        let commission_rate_decimal = Decimal::from_str(&format!("{:.2}", commission_rate)).unwrap();
         
         // Debug: print values to identify the issue
         if inserted == 0 {
             eprintln!("DEBUG: role = '{}', len = {}", role, role.len());
-            eprintln!("DEBUG: commission_rate = {}, commission_rate_str = '{}'", commission_rate, commission_rate_str);
+            eprintln!("DEBUG: commission_rate = {}, commission_rate_decimal = '{}'", commission_rate, commission_rate_decimal);
         }
         
         // Convert all String parameters to &str for proper serialization
@@ -609,8 +612,8 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         
         client.execute(query, &[
             &first_name_str, &last_name_str, &email_str, &phone_str,
-            &role_str, &hire_date_str, &commission_rate_str, &is_active
-        ]).map_err(|e| format!("Failed to insert employee (role='{}', commission_rate='{}'): {}", role, commission_rate_str, e))?;
+            &role_str, &hire_date_str, &commission_rate_decimal, &is_active
+        ]).map_err(|e| format!("Failed to insert employee (role='{}'): {}", role, e))?;
         
         inserted += 1;
     }
