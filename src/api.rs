@@ -8,7 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio_postgres::NoTls;
-use postgres_native_tls::MakeTlsConnector;
+use tokio_postgres_native_tls::MakeTlsConnector;
 use rust_decimal::Decimal;
 
 // Shared application state
