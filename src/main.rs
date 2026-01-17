@@ -45,6 +45,8 @@ fn main() {
     let mut use_postgres: bool = false;
     let mut populate_count: Option<usize> = None;
     let mut do_populate: bool = false;
+    let mut create_schema: bool = false;
+    let mut generate_sample_data: bool = false;
 
     //
     //
@@ -81,9 +83,11 @@ fn main() {
             do_populate = true;
             println!("{}", args[j]);
         } else if args[j] == "--create-schema" {
-            // Handled in second pass
+            create_schema = true;
+            println!("{}", args[j]);
         } else if args[j] == "--generate-sample-data" {
-            // Handled in second pass
+            generate_sample_data = true;
+            println!("{}", args[j]);
         }
         j += 1;
     }
@@ -148,25 +152,28 @@ fn main() {
                     2
                             },
             "--db-pgsql" => {
-                    // Process PostgreSQL connection
-                    let db = db_name.as_deref().expect("--db-name parameter is required with --db-pgsql");
-                    let mut pg_client = open_postgres_db(db);
-                    // Use table name from --table parameter, or default to "records"
-                    let table = table_name.as_deref().unwrap_or("records");
-                    
-                    if do_populate {
-                        let count = populate_count.expect("--count is required when using --populate");
-                        match insert_records_postgres(&mut pg_client, table, count) {
-                            Ok(inserted) => println!("Successfully inserted {} records", inserted),
-                            Err(e) => eprintln!("Error inserting records: {}", e),
-                        }
-                    } else {
-                        let records = get_records_postgres(&mut pg_client, table);
-                        for row in &records {
-                            for (column, value) in row {
-                                print!("{} = {} | ", column, value);
+                    // Only process if not creating schema or generating sample data
+                    if !create_schema && !generate_sample_data {
+                        // Process PostgreSQL connection
+                        let db = db_name.as_deref().expect("--db-name parameter is required with --db-pgsql");
+                        let mut pg_client = open_postgres_db(db);
+                        // Use table name from --table parameter, or default to "records"
+                        let table = table_name.as_deref().unwrap_or("records");
+                        
+                        if do_populate {
+                            let count = populate_count.expect("--count is required when using --populate");
+                            match insert_records_postgres(&mut pg_client, table, count) {
+                                Ok(inserted) => println!("Successfully inserted {} records", inserted),
+                                Err(e) => eprintln!("Error inserting records: {}", e),
                             }
-                            println!();
+                        } else {
+                            let records = get_records_postgres(&mut pg_client, table);
+                            for row in &records {
+                                for (column, value) in row {
+                                    print!("{} = {} | ", column, value);
+                                }
+                                println!();
+                            }
                         }
                     }
                     1
@@ -185,6 +192,14 @@ fn main() {
                             },
             "--populate" => {
                     // Already processed in first pass, skip
+                    1
+                            },
+            "--create-schema" => {
+                    // Already processed in main match arm above, skip
+                    1
+                            },
+            "--generate-sample-data" => {
+                    // Already processed in main match arm above, skip
                     1
                             },
             _ => {
