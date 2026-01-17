@@ -258,8 +258,7 @@ pub fn get_records_postgres(client: &mut postgres::Client, table_name: &str) -> 
     for row in rows {
         let mut row_map = HashMap::new();
         for column in &columns {
-            let value: String = row.get::<_, Option<String>>(column)
-                .flatten()
+            let value: String = row.get::<_, Option<String>>(column.as_str())
                 .unwrap_or_else(|| "NULL".to_string());
             row_map.insert(column.clone(), value);
         }
