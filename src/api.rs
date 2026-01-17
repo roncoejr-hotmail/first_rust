@@ -2802,14 +2802,14 @@ async fn get_scenario_planning(
     let monthly_rows = client
         .query("
             SELECT 
-                TO_CHAR(fd.period_start, 'YYYY-MM') as period,
+                fd.fiscal_year::text || '-' || LPAD(fd.fiscal_month::text, 2, '0') as period,
                 fs.scenario_type,
                 COALESCE(SUM(CASE WHEN fd.category = 'revenue' THEN fd.forecasted_amount ELSE -fd.forecasted_amount END), 0) as net_amount
             FROM forecast_data fd
             JOIN forecast_scenarios fs ON fd.scenario_id = fs.scenario_id
             WHERE fs.fiscal_year = $1
-            GROUP BY fd.period_start, fs.scenario_type
-            ORDER BY fd.period_start, fs.scenario_type
+            GROUP BY fd.fiscal_year, fd.fiscal_month, fs.scenario_type
+            ORDER BY fd.fiscal_year, fd.fiscal_month, fs.scenario_type
         ", &[&fiscal_year])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Monthly error: {:?}", e)))?;
