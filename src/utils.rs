@@ -5,6 +5,8 @@
 //
 use std::env;
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 
 
 //
@@ -119,4 +121,154 @@ pub fn get_records(connection: &sqlite::Connection, table_name: &str) -> Vec<Has
     //
     //
     rows
+}
+
+//
+//
+//
+//
+//
+pub fn read_pgpass(db_name: &str) -> Option<(String, u16, String, String)> {
+    //
+    //
+    //
+    //
+    let pgpass_path = match env::var("PGPASSFILE") {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => {
+            let mut home = if let Ok(home) = env::var("HOME") {
+                PathBuf::from(home)
+            } else if let Ok(userprofile) = env::var("USERPROFILE") {
+                PathBuf::from(userprofile)
+            } else {
+                return None;
+            };
+            home.push(".pgpass");
+            home
+        }
+    };
+    
+    //
+    //
+    //
+    //
+    let contents = fs::read_to_string(&pgpass_path).ok()?;
+    
+    //
+    //
+    //
+    //
+    for line in contents.lines() {
+        let parts: Vec<&str> = line.split(':').collect();
+        if parts.len() >= 5 {
+            let host = parts[0].to_string();
+            let port_str = parts[1];
+            let database = parts[2].to_string();
+            let username = parts[3].to_string();
+            let password = parts[4].to_string();
+            
+            //
+            //
+            if database == db_name || database == "*" {
+                if let Ok(port) = port_str.parse::<u16>() {
+                    return Some((host, port, username, password));
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+//
+//
+//
+//
+//
+pub fn open_postgres_db(db_name: &str) -> postgres::Client {
+    //
+    //
+    //
+    //
+    let (host, port, username, password) = read_pgpass(db_name)
+        .expect("Failed to read PostgreSQL credentials from .pgpass file");
+    
+    //
+    //
+    //
+    //
+    let connection_string = format!("postgresql://{}:{}@{}:{}/{}", 
+                                     username, password, host, port, db_name);
+    
+    //
+    //
+    //
+    //
+    let client = postgres::Client::connect(&connection_string, postgres::NoTls)
+        .expect("Failed to connect to PostgreSQL database");
+    
+    //
+    //
+    //
+    //
+    client
+}
+
+//
+//
+//
+//
+//
+pub fn get_records_postgres(client: &mut postgres::Client, table_name: &str) -> Vec<HashMap<String, String>> {
+    //
+    //
+    //
+    //
+    // Get column names first
+    let column_query = format!("SELECT column_name FROM information_schema.columns WHERE table_name = '{}' ORDER BY ordinal_position", table_name);
+    let column_rows = client.query(&column_query, &[])
+        .expect("Failed to get column names");
+    
+    let columns: Vec<String> = column_rows.iter()
+        .map(|row| row.get::<_, String>(0))
+        .collect();
+    
+    // Build query with explicit column casts to text
+    let column_list: String = columns.iter()
+        .map(|col| format!("{}::text AS {}", col, col))
+        .collect::<Vec<_>>()
+        .join(", ");
+    
+    let query = format!("SELECT {} FROM {}", column_list, table_name);
+    println!("Querying table: {}", table_name);
+    
+    //
+    //
+    //
+    //
+    let rows = client.query(&query, &[])
+        .expect("Failed to execute query");
+    
+    //
+    //
+    //
+    //
+    let mut result = Vec::new();
+    
+    for row in rows {
+        let mut row_map = HashMap::new();
+        for column in &columns {
+            let value: String = row.get::<_, Option<String>>(column)
+                .flatten()
+                .unwrap_or_else(|| "NULL".to_string());
+            row_map.insert(column.clone(), value);
+        }
+        result.push(row_map);
+    }
+    
+    //
+    //
+    //
+    //
+    result
 }
