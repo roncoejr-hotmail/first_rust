@@ -572,7 +572,8 @@ async fn get_inventory_overview(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     
-    let average_days_in_inventory: f64 = days_row.get::<_, Option<f64>>(0).unwrap_or(0.0);
+    let days_decimal: Decimal = days_row.get(0);
+    let average_days_in_inventory: f64 = days_decimal.to_string().parse().unwrap_or(0.0);
     
     // Get vehicles by type
     let type_rows = client
