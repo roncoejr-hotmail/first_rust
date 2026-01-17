@@ -2750,7 +2750,24 @@ async fn get_rolling_forecast(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Latest date error: {:?}", e)))?;
     
-    let latest_date: chrono::NaiveDate = latest_date_row.get(0);
+    let latest_date: Option<chrono::NaiveDate> = latest_date_row.get(0);
+    
+    // If no data exists, return empty response
+    if latest_date.is_none() {
+        return Ok(Json(RollingForecastOverview {
+            latest_forecast_date: "N/A".to_string(),
+            total_forecasted: 0.0,
+            total_actual: 0.0,
+            total_variance: 0.0,
+            forecast_accuracy: 0.0,
+            rolling_forecast_trend: Vec::new(),
+            forecast_vs_actual: Vec::new(),
+            category_forecast: Vec::new(),
+            forecast_accuracy_by_category: Vec::new(),
+        }));
+    }
+    
+    let latest_date = latest_date.unwrap();
     let latest_forecast_date = latest_date.format("%Y-%m-%d").to_string();
     
     // Get overall totals for the latest forecast
