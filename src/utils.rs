@@ -7,6 +7,7 @@ use std::env;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use fake::{Fake, Faker};
 
 
 //
@@ -275,4 +276,97 @@ pub fn get_records_postgres(client: &mut postgres::Client, table_name: &str) -> 
     //
     //
     result
+}
+
+//
+//
+//
+//
+//
+pub fn generate_random_first_name() -> String {
+    //
+    //
+    //
+    //
+    let name: String = Faker.fake();
+    // Limit to 10 characters as per database constraint
+    name.chars().take(10).collect()
+}
+
+//
+//
+//
+//
+//
+pub fn generate_random_last_name() -> String {
+    //
+    //
+    //
+    //
+    let name: String = Faker.fake();
+    // Limit to 10 characters as per database constraint
+    name.chars().take(10).collect()
+}
+
+//
+//
+//
+//
+//
+pub fn insert_records_sqlite(connection: &sqlite::Connection, table_name: &str, count: usize) -> Result<usize, String> {
+    //
+    //
+    //
+    //
+    let mut inserted = 0;
+    for _ in 0..count {
+        let fname = generate_random_first_name();
+        let lname = generate_random_last_name();
+        
+        let query = format!("INSERT INTO {} (fname, lname) VALUES ('{}', '{}')", 
+                           table_name, 
+                           fname.replace("'", "''"), 
+                           lname.replace("'", "''"));
+        
+        connection.execute(&query)
+            .map_err(|e| format!("Failed to execute insert: {}", e))?;
+        
+        inserted += 1;
+    }
+    
+    //
+    //
+    //
+    //
+    Ok(inserted)
+}
+
+//
+//
+//
+//
+//
+pub fn insert_records_postgres(client: &mut postgres::Client, table_name: &str, count: usize) -> Result<usize, String> {
+    //
+    //
+    //
+    //
+    let query = format!("INSERT INTO {} (fname, lname) VALUES ($1, $2)", table_name);
+    
+    let mut inserted = 0;
+    for _ in 0..count {
+        let fname = generate_random_first_name();
+        let lname = generate_random_last_name();
+        
+        client.execute(&query, &[&fname, &lname])
+            .map_err(|e| format!("Failed to insert record: {}", e))?;
+        
+        inserted += 1;
+    }
+    
+    //
+    //
+    //
+    //
+    Ok(inserted)
 }
