@@ -1029,13 +1029,19 @@ async fn get_inventory_overview(
     let total_inventory_value: f64 = inventory_value_decimal.to_string().parse().unwrap_or(0.0);
     
     // Get average days in inventory (for sold vehicles)
+    let days_filter = if !conditions.is_empty() {
+        format!(" AND {}", conditions.join(" AND "))
+    } else {
+        String::new()
+    };
+    let days_query = format!("
+        SELECT COALESCE(AVG(s.sale_date - v.date_acquired), 0) as avg_days
+        FROM vehicles v
+        JOIN sales s ON v.vehicle_id = s.vehicle_id
+        WHERE v.status = 'sold'{}
+    ", days_filter);
     let days_row = client
-        .query_one("
-            SELECT COALESCE(AVG(s.sale_date - v.date_acquired), 0) as avg_days
-            FROM vehicles v
-            JOIN sales s ON v.vehicle_id = s.vehicle_id
-            WHERE v.status = 'sold'
-        ", &[])
+        .query_one(&days_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     
@@ -1079,20 +1085,26 @@ async fn get_inventory_overview(
     }
     
     // Get cost vs price analysis
+    let analysis_filter = if !conditions.is_empty() {
+        format!(" AND {}", conditions.join(" AND "))
+    } else {
+        String::new()
+    };
+    let analysis_query = format!("
+        SELECT 
+            v.vehicle_type,
+            AVG(v.cost_price) as avg_cost,
+            AVG(s.sale_price) as avg_sale_price,
+            AVG((s.sale_price - v.cost_price) / v.cost_price * 100) as avg_markup,
+            COUNT(*) as count
+        FROM vehicles v
+        JOIN sales s ON v.vehicle_id = s.vehicle_id
+        WHERE v.status = 'sold'{}
+        GROUP BY v.vehicle_type
+        ORDER BY count DESC
+    ", analysis_filter);
     let analysis_rows = client
-        .query("
-            SELECT 
-                v.vehicle_type,
-                AVG(v.cost_price) as avg_cost,
-                AVG(s.sale_price) as avg_sale_price,
-                AVG((s.sale_price - v.cost_price) / v.cost_price * 100) as avg_markup,
-                COUNT(*) as count
-            FROM vehicles v
-            JOIN sales s ON v.vehicle_id = s.vehicle_id
-            WHERE v.status = 'sold'
-            GROUP BY v.vehicle_type
-            ORDER BY count DESC
-        ", &[])
+        .query(&analysis_query, &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
     

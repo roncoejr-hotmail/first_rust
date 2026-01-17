@@ -7,12 +7,12 @@ import {
   MenuItem, 
   Chip,
   OutlinedInput,
-  SelectChangeEvent,
   Paper,
   Typography,
   IconButton,
   Collapse
 } from '@mui/material';
+import type { SelectChangeEvent } from '@mui/material/Select';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import { useState } from 'react';
 

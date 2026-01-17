@@ -26,13 +26,9 @@ export default function InventoryDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Filter states
+  // Filter states - show all time by default for inventory
   const getDefaultEndDate = () => new Date().toISOString().split('T')[0];
-  const getDefaultStartDate = () => {
-    const date = new Date();
-    date.setFullYear(date.getFullYear() - 1);
-    return date.toISOString().split('T')[0];
-  };
+  const getDefaultStartDate = () => '2010-01-01';
   
   const [startDate, setStartDate] = useState(getDefaultStartDate());
   const [endDate, setEndDate] = useState(getDefaultEndDate());

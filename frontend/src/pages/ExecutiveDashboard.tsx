@@ -24,13 +24,9 @@ export default function ExecutiveDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Set default date range to last 30 days
+  // Set default date range to all time
   const getDefaultEndDate = () => new Date().toISOString().split('T')[0];
-  const getDefaultStartDate = () => {
-    const date = new Date();
-    date.setDate(date.getDate() - 30);
-    return date.toISOString().split('T')[0];
-  };
+  const getDefaultStartDate = () => '2010-01-01';
   
   const [startDate, setStartDate] = useState(getDefaultStartDate());
   const [endDate, setEndDate] = useState(getDefaultEndDate());
