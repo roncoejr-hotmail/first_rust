@@ -688,6 +688,69 @@ pub struct CashFlowAnalysis {
     pub inventory_investment: f64,
 }
 
+// Budget Management Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BudgetManagementOverview {
+    pub fiscal_year: i32,
+    pub total_budget: f64,
+    pub total_actual: f64,
+    pub total_variance: f64,
+    pub variance_percentage: f64,
+    pub budget_by_category: Vec<BudgetCategory>,
+    pub budget_by_department: Vec<BudgetDepartment>,
+    pub monthly_budget_trend: Vec<MonthlyBudgetTrend>,
+    pub budget_utilization: Vec<BudgetUtilization>,
+    pub top_variances: Vec<VarianceDetail>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BudgetCategory {
+    pub category: String,
+    pub budgeted: f64,
+    pub actual: f64,
+    pub variance: f64,
+    pub variance_percentage: f64,
+    pub status: String, // 'over', 'under', 'on-track'
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BudgetDepartment {
+    pub department: String,
+    pub budgeted: f64,
+    pub actual: f64,
+    pub variance: f64,
+    pub variance_percentage: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MonthlyBudgetTrend {
+    pub month: String,
+    pub budgeted: f64,
+    pub actual: f64,
+    pub variance: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BudgetUtilization {
+    pub category: String,
+    pub department: String,
+    pub budgeted: f64,
+    pub actual: f64,
+    pub utilized_percentage: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VarianceDetail {
+    pub category: String,
+    pub subcategory: String,
+    pub department: String,
+    pub month: String,
+    pub budgeted: f64,
+    pub actual: f64,
+    pub variance: f64,
+    pub variance_percentage: f64,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -2462,6 +2525,280 @@ async fn get_financial_forecast(
     }))
 }
 
+// Handler for budget management dashboard
+async fn get_budget_management(
+    State(state): State<Arc<AppState>>,
+    Query(filters): Query<DateRangeFilter>,
+) -> Result<Json<BudgetManagementOverview>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    // Default to current year if no filter
+    let fiscal_year = 2023; // TODO: Extract from filters or use current year
+    
+    // Get overall budget summary
+    let summary_row = client
+        .query_one("
+            SELECT 
+                COALESCE(SUM(b.budgeted_amount), 0) as total_budget,
+                COALESCE(SUM(a.actual_amount), 0) as total_actual
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Summary error: {}", e)))?;
+    
+    let budget_decimal: Decimal = summary_row.get(0);
+    let total_budget: f64 = budget_decimal.to_string().parse().unwrap_or(0.0);
+    let actual_decimal: Decimal = summary_row.get(1);
+    let total_actual: f64 = actual_decimal.to_string().parse().unwrap_or(0.0);
+    let total_variance = total_actual - total_budget;
+    let variance_percentage = if total_budget > 0.0 {
+        (total_variance / total_budget) * 100.0
+    } else {
+        0.0
+    };
+    
+    // Budget by category
+    let category_rows = client
+        .query("
+            SELECT 
+                b.category,
+                COALESCE(SUM(b.budgeted_amount), 0) as budgeted,
+                COALESCE(SUM(a.actual_amount), 0) as actual,
+                COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) as variance
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+            GROUP BY b.category
+            ORDER BY budgeted DESC
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Category error: {}", e)))?;
+    
+    let mut budget_by_category = Vec::new();
+    for row in category_rows {
+        let category: String = row.get(0);
+        let budgeted_dec: Decimal = row.get(1);
+        let budgeted: f64 = budgeted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(2);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let variance_dec: Decimal = row.get(3);
+        let variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+        let variance_pct = if budgeted > 0.0 { (variance / budgeted) * 100.0 } else { 0.0 };
+        
+        let status = if variance_pct.abs() <= 5.0 {
+            "on-track"
+        } else if variance > 0.0 {
+            "over"
+        } else {
+            "under"
+        };
+        
+        budget_by_category.push(BudgetCategory {
+            category,
+            budgeted,
+            actual,
+            variance,
+            variance_percentage: variance_pct,
+            status: status.to_string(),
+        });
+    }
+    
+    // Budget by department
+    let dept_rows = client
+        .query("
+            SELECT 
+                b.department,
+                COALESCE(SUM(b.budgeted_amount), 0) as budgeted,
+                COALESCE(SUM(a.actual_amount), 0) as actual,
+                COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) as variance
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category AND
+                COALESCE(b.department, '') = COALESCE(a.department, '')
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+            GROUP BY b.department
+            ORDER BY budgeted DESC
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Department error: {}", e)))?;
+    
+    let mut budget_by_department = Vec::new();
+    for row in dept_rows {
+        let department: String = row.get(0);
+        let budgeted_dec: Decimal = row.get(1);
+        let budgeted: f64 = budgeted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(2);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let variance_dec: Decimal = row.get(3);
+        let variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+        let variance_pct = if budgeted > 0.0 { (variance / budgeted) * 100.0 } else { 0.0 };
+        
+        budget_by_department.push(BudgetDepartment {
+            department,
+            budgeted,
+            actual,
+            variance,
+            variance_percentage: variance_pct,
+        });
+    }
+    
+    // Monthly budget trend
+    let monthly_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(TO_DATE(b.fiscal_year::text || '-' || LPAD(b.fiscal_month::text, 2, '0'), 'YYYY-MM'), 'YYYY-MM') as month,
+                COALESCE(SUM(b.budgeted_amount), 0) as budgeted,
+                COALESCE(SUM(a.actual_amount), 0) as actual,
+                COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) as variance
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+            GROUP BY b.fiscal_year, b.fiscal_month
+            ORDER BY b.fiscal_month
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Monthly error: {}", e)))?;
+    
+    let mut monthly_budget_trend = Vec::new();
+    for row in monthly_rows {
+        let month: String = row.get(0);
+        let budgeted_dec: Decimal = row.get(1);
+        let budgeted: f64 = budgeted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(2);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let variance_dec: Decimal = row.get(3);
+        let variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+        
+        monthly_budget_trend.push(MonthlyBudgetTrend {
+            month,
+            budgeted,
+            actual,
+            variance,
+        });
+    }
+    
+    // Budget utilization
+    let util_rows = client
+        .query("
+            SELECT 
+                b.category,
+                b.department,
+                COALESCE(SUM(b.budgeted_amount), 0) as budgeted,
+                COALESCE(SUM(a.actual_amount), 0) as actual
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category AND
+                COALESCE(b.department, '') = COALESCE(a.department, '')
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+            GROUP BY b.category, b.department
+            HAVING COALESCE(SUM(b.budgeted_amount), 0) > 0
+            ORDER BY (COALESCE(SUM(a.actual_amount), 0) / COALESCE(SUM(b.budgeted_amount), 1) * 100) DESC
+            LIMIT 10
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Utilization error: {}", e)))?;
+    
+    let mut budget_utilization = Vec::new();
+    for row in util_rows {
+        let category: String = row.get(0);
+        let department: String = row.get(1);
+        let budgeted_dec: Decimal = row.get(2);
+        let budgeted: f64 = budgeted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(3);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let utilized_pct = if budgeted > 0.0 { (actual / budgeted) * 100.0 } else { 0.0 };
+        
+        budget_utilization.push(BudgetUtilization {
+            category,
+            department,
+            budgeted,
+            actual,
+            utilized_percentage: utilized_pct,
+        });
+    }
+    
+    // Top variances
+    let variance_rows = client
+        .query("
+            SELECT 
+                b.category,
+                COALESCE(b.subcategory, 'N/A') as subcategory,
+                b.department,
+                TO_CHAR(TO_DATE(b.fiscal_year::text || '-' || LPAD(b.fiscal_month::text, 2, '0'), 'YYYY-MM'), 'YYYY-MM') as month,
+                COALESCE(SUM(b.budgeted_amount), 0) as budgeted,
+                COALESCE(SUM(a.actual_amount), 0) as actual,
+                COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0) as variance
+            FROM budgets b
+            LEFT JOIN actuals a ON 
+                b.fiscal_year = a.fiscal_year AND
+                b.fiscal_month = a.fiscal_month AND
+                b.category = a.category AND
+                COALESCE(b.subcategory, '') = COALESCE(a.subcategory, '')
+            WHERE b.fiscal_year = $1 AND b.status = 'approved'
+            GROUP BY b.category, b.subcategory, b.department, b.fiscal_year, b.fiscal_month
+            ORDER BY ABS(COALESCE(SUM(a.actual_amount), 0) - COALESCE(SUM(b.budgeted_amount), 0)) DESC
+            LIMIT 10
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Variance error: {}", e)))?;
+    
+    let mut top_variances = Vec::new();
+    for row in variance_rows {
+        let category: String = row.get(0);
+        let subcategory: String = row.get(1);
+        let department: String = row.get(2);
+        let month: String = row.get(3);
+        let budgeted_dec: Decimal = row.get(4);
+        let budgeted: f64 = budgeted_dec.to_string().parse().unwrap_or(0.0);
+        let actual_dec: Decimal = row.get(5);
+        let actual: f64 = actual_dec.to_string().parse().unwrap_or(0.0);
+        let variance_dec: Decimal = row.get(6);
+        let variance: f64 = variance_dec.to_string().parse().unwrap_or(0.0);
+        let variance_pct = if budgeted > 0.0 { (variance / budgeted) * 100.0 } else { 0.0 };
+        
+        top_variances.push(VarianceDetail {
+            category,
+            subcategory,
+            department,
+            month,
+            budgeted,
+            actual,
+            variance,
+            variance_percentage: variance_pct,
+        });
+    }
+    
+    Ok(Json(BudgetManagementOverview {
+        fiscal_year,
+        total_budget,
+        total_actual,
+        total_variance,
+        variance_percentage,
+        budget_by_category,
+        budget_by_department,
+        monthly_budget_trend,
+        budget_utilization,
+        top_variances,
+    }))
+}
+
 // Health check endpoint
 async fn health_check() -> &'static str {
     "OK"
@@ -2481,5 +2818,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/api/dashboard/maintenance", get(get_maintenance_analytics))
         .route("/api/dashboard/employees", get(get_employee_performance))
         .route("/api/dashboard/forecasting", get(get_financial_forecast))
+        .route("/api/fpa/budget-management", get(get_budget_management))
         .with_state(state)
 }
