@@ -472,11 +472,19 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         let date_acquired_str: &str = &date_acquired;
         let description_str: &str = &description;
         
-        client.execute(query, &[
+        let result = client.query(query, &[
             &vin_str, &make_str, &model_str, &year, &color_str, &mileage,
             &condition_str, &vehicle_type_str, &cost_price_str, &list_price_str,
             &status_str, &date_acquired_str, &description_str
-        ]).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}', cost_price='{}'): {}", vin, vehicle_type, cost_price_str, e))?;
+        ]);
+        
+        match result {
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("FULL ERROR: {:?}", e);
+                return Err(format!("Failed to insert vehicle (vin={}, vehicle_type='{}'): {}", vin, vehicle_type, e));
+            }
+        }
         
         inserted += 1;
     }
