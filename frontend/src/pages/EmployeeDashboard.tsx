@@ -81,9 +81,13 @@ export default function EmployeeDashboard() {
 
   // Transform top performers to leaderboard format
   const leaderboardData = data.top_performers.map(emp => ({
+    employee_id: emp.employee_id,
     name: emp.employee_name,
-    value: emp.total_revenue,
-    subtitle: `${emp.total_sales} sales • ${emp.role}`
+    role: emp.role,
+    total_sales: emp.total_sales,
+    total_revenue: emp.total_revenue,
+    commission_earned: emp.commission_earned,
+    average_sale_price: emp.average_deal_size
   }));
 
   return (
@@ -187,7 +191,7 @@ export default function EmployeeDashboard() {
             Highest revenue-generating employees
           </Typography>
           <Divider sx={{ mb: 2 }} />
-          <SalesLeaderboard data={leaderboardData} />
+          <SalesLeaderboard performers={leaderboardData} />
         </Paper>
       </Box>
 

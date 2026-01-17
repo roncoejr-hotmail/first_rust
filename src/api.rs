@@ -577,6 +577,69 @@ pub struct EmployeeDetail {
     pub days_employed: i32,
 }
 
+// Financial Forecasting Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FinancialForecast {
+    pub total_revenue: f64,
+    pub total_profit: f64,
+    pub profit_margin: f64,
+    pub average_monthly_revenue: f64,
+    pub month_over_month_growth: f64,
+    pub year_over_year_growth: f64,
+    pub monthly_trends: Vec<MonthlyFinancialTrend>,
+    pub profitability_by_vehicle_type: Vec<VehicleProfitability>,
+    pub quarterly_summary: Vec<QuarterlySummary>,
+    pub revenue_forecast: Vec<ForecastProjection>,
+    pub cash_flow_analysis: CashFlowAnalysis,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MonthlyFinancialTrend {
+    pub month: String,
+    pub revenue: f64,
+    pub cost: f64,
+    pub profit: f64,
+    pub profit_margin: f64,
+    pub sales_count: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VehicleProfitability {
+    pub vehicle_type: String,
+    pub total_revenue: f64,
+    pub total_cost: f64,
+    pub total_profit: f64,
+    pub profit_margin: f64,
+    pub units_sold: i32,
+    pub avg_profit_per_unit: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QuarterlySummary {
+    pub quarter: String,
+    pub revenue: f64,
+    pub profit: f64,
+    pub sales_count: i32,
+    pub average_sale_price: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ForecastProjection {
+    pub month: String,
+    pub projected_revenue: f64,
+    pub confidence_level: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CashFlowAnalysis {
+    pub total_inflow: f64,
+    pub total_outflow: f64,
+    pub net_cash_flow: f64,
+    pub loan_payments_received: f64,
+    pub maintenance_expenses: f64,
+    pub inventory_investment: f64,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -1949,6 +2012,275 @@ async fn get_employee_performance(
     }))
 }
 
+// Handler for financial forecasting
+async fn get_financial_forecast(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<FinancialForecast>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    // Get overall financial metrics
+    let overall_row = client
+        .query_one("
+            SELECT 
+                COALESCE(SUM(s.sale_price), 0) as total_revenue,
+                COALESCE(SUM(s.sale_price - v.cost_price), 0) as total_profit,
+                CASE 
+                    WHEN SUM(s.sale_price) > 0 
+                    THEN (SUM(s.sale_price - v.cost_price) / SUM(s.sale_price) * 100)
+                    ELSE 0
+                END as profit_margin
+            FROM sales s
+            JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Overall metrics error: {}", e)))?;
+    
+    let revenue_decimal: Decimal = overall_row.get(0);
+    let total_revenue: f64 = revenue_decimal.to_string().parse().unwrap_or(0.0);
+    let profit_decimal: Decimal = overall_row.get(1);
+    let total_profit: f64 = profit_decimal.to_string().parse().unwrap_or(0.0);
+    let margin_decimal: Decimal = overall_row.get(2);
+    let profit_margin: f64 = margin_decimal.to_string().parse().unwrap_or(0.0);
+    
+    // Get monthly trends
+    let monthly_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(s.sale_date, 'YYYY-MM') as month,
+                COALESCE(SUM(s.sale_price), 0) as revenue,
+                COALESCE(SUM(v.cost_price), 0) as cost,
+                COALESCE(SUM(s.sale_price - v.cost_price), 0) as profit,
+                CASE 
+                    WHEN SUM(s.sale_price) > 0 
+                    THEN (SUM(s.sale_price - v.cost_price) / SUM(s.sale_price) * 100)
+                    ELSE 0
+                END as profit_margin,
+                COUNT(*) as sales_count
+            FROM sales s
+            JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+            GROUP BY TO_CHAR(s.sale_date, 'YYYY-MM')
+            ORDER BY month ASC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Monthly trends error: {}", e)))?;
+    
+    let mut monthly_trends = Vec::new();
+    for row in monthly_rows {
+        let month: String = row.get(0);
+        let rev_decimal: Decimal = row.get(1);
+        let revenue: f64 = rev_decimal.to_string().parse().unwrap_or(0.0);
+        let cost_decimal: Decimal = row.get(2);
+        let cost: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
+        let profit_decimal: Decimal = row.get(3);
+        let profit: f64 = profit_decimal.to_string().parse().unwrap_or(0.0);
+        let margin_decimal: Decimal = row.get(4);
+        let profit_margin: f64 = margin_decimal.to_string().parse().unwrap_or(0.0);
+        let sales_count: i64 = row.get(5);
+        
+        monthly_trends.push(MonthlyFinancialTrend {
+            month,
+            revenue,
+            cost,
+            profit,
+            profit_margin,
+            sales_count: sales_count as i32,
+        });
+    }
+    
+    // Calculate average monthly revenue
+    let average_monthly_revenue = if !monthly_trends.is_empty() {
+        total_revenue / monthly_trends.len() as f64
+    } else {
+        0.0
+    };
+    
+    // Calculate month-over-month growth
+    let month_over_month_growth = if monthly_trends.len() >= 2 {
+        let last_month = &monthly_trends[monthly_trends.len() - 1];
+        let prev_month = &monthly_trends[monthly_trends.len() - 2];
+        if prev_month.revenue > 0.0 {
+            ((last_month.revenue - prev_month.revenue) / prev_month.revenue) * 100.0
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    
+    // Calculate year-over-year growth (if we have 12+ months of data)
+    let year_over_year_growth = if monthly_trends.len() >= 13 {
+        let current_month = &monthly_trends[monthly_trends.len() - 1];
+        let year_ago_month = &monthly_trends[monthly_trends.len() - 13];
+        if year_ago_month.revenue > 0.0 {
+            ((current_month.revenue - year_ago_month.revenue) / year_ago_month.revenue) * 100.0
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    
+    // Get profitability by vehicle type
+    let profitability_rows = client
+        .query("
+            SELECT 
+                v.vehicle_type,
+                COALESCE(SUM(s.sale_price), 0) as total_revenue,
+                COALESCE(SUM(v.cost_price), 0) as total_cost,
+                COALESCE(SUM(s.sale_price - v.cost_price), 0) as total_profit,
+                CASE 
+                    WHEN SUM(s.sale_price) > 0 
+                    THEN (SUM(s.sale_price - v.cost_price) / SUM(s.sale_price) * 100)
+                    ELSE 0
+                END as profit_margin,
+                COUNT(*) as units_sold,
+                CASE 
+                    WHEN COUNT(*) > 0 
+                    THEN SUM(s.sale_price - v.cost_price) / COUNT(*)
+                    ELSE 0
+                END as avg_profit_per_unit
+            FROM sales s
+            JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+            GROUP BY v.vehicle_type
+            ORDER BY total_profit DESC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Profitability error: {}", e)))?;
+    
+    let mut profitability_by_vehicle_type = Vec::new();
+    for row in profitability_rows {
+        let vehicle_type: String = row.get(0);
+        let rev_decimal: Decimal = row.get(1);
+        let total_revenue: f64 = rev_decimal.to_string().parse().unwrap_or(0.0);
+        let cost_decimal: Decimal = row.get(2);
+        let total_cost: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
+        let profit_decimal: Decimal = row.get(3);
+        let total_profit: f64 = profit_decimal.to_string().parse().unwrap_or(0.0);
+        let margin_decimal: Decimal = row.get(4);
+        let profit_margin: f64 = margin_decimal.to_string().parse().unwrap_or(0.0);
+        let units_sold: i64 = row.get(5);
+        let avg_decimal: Decimal = row.get(6);
+        let avg_profit_per_unit: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        
+        profitability_by_vehicle_type.push(VehicleProfitability {
+            vehicle_type,
+            total_revenue,
+            total_cost,
+            total_profit,
+            profit_margin,
+            units_sold: units_sold as i32,
+            avg_profit_per_unit,
+        });
+    }
+    
+    // Get quarterly summary
+    let quarterly_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(s.sale_date, 'YYYY-\"Q\"Q') as quarter,
+                COALESCE(SUM(s.sale_price), 0) as revenue,
+                COALESCE(SUM(s.sale_price - v.cost_price), 0) as profit,
+                COUNT(*) as sales_count,
+                COALESCE(AVG(s.sale_price), 0) as avg_sale_price
+            FROM sales s
+            JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+            GROUP BY TO_CHAR(s.sale_date, 'YYYY-\"Q\"Q')
+            ORDER BY quarter ASC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Quarterly summary error: {}", e)))?;
+    
+    let mut quarterly_summary = Vec::new();
+    for row in quarterly_rows {
+        let quarter: String = row.get(0);
+        let rev_decimal: Decimal = row.get(1);
+        let revenue: f64 = rev_decimal.to_string().parse().unwrap_or(0.0);
+        let profit_decimal: Decimal = row.get(2);
+        let profit: f64 = profit_decimal.to_string().parse().unwrap_or(0.0);
+        let sales_count: i64 = row.get(3);
+        let avg_decimal: Decimal = row.get(4);
+        let average_sale_price: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        
+        quarterly_summary.push(QuarterlySummary {
+            quarter,
+            revenue,
+            profit,
+            sales_count: sales_count as i32,
+            average_sale_price,
+        });
+    }
+    
+    // Simple forecast: project next 3 months based on average monthly revenue with growth trend
+    let mut revenue_forecast = Vec::new();
+    if !monthly_trends.is_empty() {
+        let base_forecast = average_monthly_revenue * (1.0 + (month_over_month_growth / 100.0));
+        let last_month = &monthly_trends[monthly_trends.len() - 1];
+        
+        // Parse last month and project forward
+        for i in 1..=3 {
+            let projected = base_forecast * (1.0 + (month_over_month_growth / 100.0 * i as f64));
+            let confidence = if i == 1 { "High" } else if i == 2 { "Medium" } else { "Low" };
+            
+            revenue_forecast.push(ForecastProjection {
+                month: format!("{}+{}", last_month.month, i),
+                projected_revenue: projected,
+                confidence_level: confidence.to_string(),
+            });
+        }
+    }
+    
+    // Cash flow analysis
+    let cash_flow_row = client
+        .query_one("
+            SELECT 
+                COALESCE(SUM(s.sale_price), 0) as total_inflow,
+                COALESCE(SUM(v.cost_price), 0) as inventory_investment,
+                COALESCE((SELECT SUM(payment_amount) FROM payments WHERE payment_status = 'processed'), 0) as loan_payments,
+                COALESCE((SELECT SUM(cost) FROM maintenance_history), 0) as maintenance_expenses
+            FROM sales s
+            JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Cash flow error: {}", e)))?;
+    
+    let inflow_decimal: Decimal = cash_flow_row.get(0);
+    let total_inflow: f64 = inflow_decimal.to_string().parse().unwrap_or(0.0);
+    let inventory_decimal: Decimal = cash_flow_row.get(1);
+    let inventory_investment: f64 = inventory_decimal.to_string().parse().unwrap_or(0.0);
+    let loan_decimal: Decimal = cash_flow_row.get(2);
+    let loan_payments_received: f64 = loan_decimal.to_string().parse().unwrap_or(0.0);
+    let maint_decimal: Decimal = cash_flow_row.get(3);
+    let maintenance_expenses: f64 = maint_decimal.to_string().parse().unwrap_or(0.0);
+    
+    let total_outflow = inventory_investment + maintenance_expenses;
+    let net_cash_flow = total_inflow + loan_payments_received - total_outflow;
+    
+    let cash_flow_analysis = CashFlowAnalysis {
+        total_inflow,
+        total_outflow,
+        net_cash_flow,
+        loan_payments_received,
+        maintenance_expenses,
+        inventory_investment,
+    };
+    
+    Ok(Json(FinancialForecast {
+        total_revenue,
+        total_profit,
+        profit_margin,
+        average_monthly_revenue,
+        month_over_month_growth,
+        year_over_year_growth,
+        monthly_trends,
+        profitability_by_vehicle_type,
+        quarterly_summary,
+        revenue_forecast,
+        cash_flow_analysis,
+    }))
+}
+
 // Health check endpoint
 async fn health_check() -> &'static str {
     "OK"
@@ -1967,5 +2299,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/api/dashboard/customers", get(get_customer_analytics))
         .route("/api/dashboard/maintenance", get(get_maintenance_analytics))
         .route("/api/dashboard/employees", get(get_employee_performance))
+        .route("/api/dashboard/forecasting", get(get_financial_forecast))
         .with_state(state)
 }
