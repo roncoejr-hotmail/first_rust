@@ -520,6 +520,63 @@ pub struct ServiceProviderStat {
     pub average_cost: f64,
 }
 
+// Employee Performance Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EmployeePerformance {
+    pub total_employees: i64,
+    pub active_employees: i64,
+    pub total_commission_paid: f64,
+    pub average_commission_rate: f64,
+    pub top_performers: Vec<EmployeeStats>,
+    pub performance_by_role: Vec<RolePerformance>,
+    pub monthly_performance: Vec<MonthlyEmployeePerformance>,
+    pub employee_list: Vec<EmployeeDetail>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EmployeeStats {
+    pub employee_id: i32,
+    pub employee_name: String,
+    pub role: String,
+    pub total_sales: i32,
+    pub total_revenue: f64,
+    pub commission_earned: f64,
+    pub average_deal_size: f64,
+    pub commission_rate: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RolePerformance {
+    pub role: String,
+    pub employee_count: i32,
+    pub total_sales: i32,
+    pub total_revenue: f64,
+    pub average_revenue_per_employee: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MonthlyEmployeePerformance {
+    pub month: String,
+    pub total_sales: i32,
+    pub total_revenue: f64,
+    pub total_commission: f64,
+    pub active_employees: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EmployeeDetail {
+    pub employee_id: i32,
+    pub employee_name: String,
+    pub email: String,
+    pub role: String,
+    pub hire_date: String,
+    pub commission_rate: f64,
+    pub is_active: bool,
+    pub total_sales: i32,
+    pub total_revenue: f64,
+    pub days_employed: i32,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -1662,6 +1719,236 @@ async fn get_maintenance_analytics(
     }))
 }
 
+// Handler for employee performance
+async fn get_employee_performance(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<EmployeePerformance>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    // Get overall employee statistics
+    let stats_row = client
+        .query_one("
+            SELECT 
+                COUNT(*) as total_employees,
+                SUM(CASE WHEN is_active = TRUE THEN 1 ELSE 0 END) as active_employees,
+                COALESCE(AVG(commission_rate), 0) as avg_commission_rate
+            FROM employees
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Employee stats error: {}", e)))?;
+    
+    let total_employees: i64 = stats_row.get(0);
+    let active_employees: i64 = stats_row.get(1);
+    let avg_rate_decimal: Decimal = stats_row.get(2);
+    let average_commission_rate: f64 = avg_rate_decimal.to_string().parse().unwrap_or(0.0);
+    
+    // Calculate total commission paid
+    let commission_row = client
+        .query_one("
+            SELECT COALESCE(SUM(s.sale_price * e.commission_rate / 100), 0) as total_commission
+            FROM sales s
+            JOIN employees e ON s.salesperson_id = e.employee_id
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Commission calc error: {}", e)))?;
+    
+    let commission_decimal: Decimal = commission_row.get(0);
+    let total_commission_paid: f64 = commission_decimal.to_string().parse().unwrap_or(0.0);
+    
+    // Get top performers
+    let performer_rows = client
+        .query("
+            SELECT 
+                e.employee_id,
+                e.first_name || ' ' || e.last_name as employee_name,
+                e.role,
+                COUNT(s.sale_id) as total_sales,
+                COALESCE(SUM(s.sale_price), 0) as total_revenue,
+                COALESCE(SUM(s.sale_price * e.commission_rate / 100), 0) as commission_earned,
+                CASE 
+                    WHEN COUNT(s.sale_id) > 0 
+                    THEN COALESCE(SUM(s.sale_price), 0) / COUNT(s.sale_id)
+                    ELSE 0
+                END as avg_deal_size,
+                e.commission_rate
+            FROM employees e
+            LEFT JOIN sales s ON e.employee_id = s.salesperson_id
+            GROUP BY e.employee_id, e.first_name, e.last_name, e.role, e.commission_rate
+            HAVING COUNT(s.sale_id) > 0
+            ORDER BY total_revenue DESC
+            LIMIT 10
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Top performers error: {}", e)))?;
+    
+    let mut top_performers = Vec::new();
+    for row in performer_rows {
+        let employee_id: i32 = row.get(0);
+        let employee_name: String = row.get(1);
+        let role: String = row.get(2);
+        let total_sales: i64 = row.get(3);
+        let revenue_decimal: Decimal = row.get(4);
+        let total_revenue: f64 = revenue_decimal.to_string().parse().unwrap_or(0.0);
+        let commission_decimal: Decimal = row.get(5);
+        let commission_earned: f64 = commission_decimal.to_string().parse().unwrap_or(0.0);
+        let avg_decimal: Decimal = row.get(6);
+        let average_deal_size: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        let rate_decimal: Decimal = row.get(7);
+        let commission_rate: f64 = rate_decimal.to_string().parse().unwrap_or(0.0);
+        
+        top_performers.push(EmployeeStats {
+            employee_id,
+            employee_name,
+            role,
+            total_sales: total_sales as i32,
+            total_revenue,
+            commission_earned,
+            average_deal_size,
+            commission_rate,
+        });
+    }
+    
+    // Get performance by role
+    let role_rows = client
+        .query("
+            SELECT 
+                e.role,
+                COUNT(DISTINCT e.employee_id) as employee_count,
+                COUNT(s.sale_id) as total_sales,
+                COALESCE(SUM(s.sale_price), 0) as total_revenue,
+                CASE 
+                    WHEN COUNT(DISTINCT e.employee_id) > 0 
+                    THEN COALESCE(SUM(s.sale_price), 0) / COUNT(DISTINCT e.employee_id)
+                    ELSE 0
+                END as avg_revenue_per_employee
+            FROM employees e
+            LEFT JOIN sales s ON e.employee_id = s.salesperson_id
+            GROUP BY e.role
+            ORDER BY total_revenue DESC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Role performance error: {}", e)))?;
+    
+    let mut performance_by_role = Vec::new();
+    for row in role_rows {
+        let role: String = row.get(0);
+        let employee_count: i64 = row.get(1);
+        let total_sales: i64 = row.get(2);
+        let revenue_decimal: Decimal = row.get(3);
+        let total_revenue: f64 = revenue_decimal.to_string().parse().unwrap_or(0.0);
+        let avg_decimal: Decimal = row.get(4);
+        let average_revenue_per_employee: f64 = avg_decimal.to_string().parse().unwrap_or(0.0);
+        
+        performance_by_role.push(RolePerformance {
+            role,
+            employee_count: employee_count as i32,
+            total_sales: total_sales as i32,
+            total_revenue,
+            average_revenue_per_employee,
+        });
+    }
+    
+    // Get monthly performance trends
+    let monthly_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(s.sale_date, 'YYYY-MM') as month,
+                COUNT(s.sale_id) as total_sales,
+                COALESCE(SUM(s.sale_price), 0) as total_revenue,
+                COALESCE(SUM(s.sale_price * e.commission_rate / 100), 0) as total_commission,
+                COUNT(DISTINCT e.employee_id) as active_employees
+            FROM sales s
+            JOIN employees e ON s.salesperson_id = e.employee_id
+            GROUP BY TO_CHAR(s.sale_date, 'YYYY-MM')
+            ORDER BY month ASC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Monthly performance error: {}", e)))?;
+    
+    let mut monthly_performance = Vec::new();
+    for row in monthly_rows {
+        let month: String = row.get(0);
+        let total_sales: i64 = row.get(1);
+        let revenue_decimal: Decimal = row.get(2);
+        let total_revenue: f64 = revenue_decimal.to_string().parse().unwrap_or(0.0);
+        let commission_decimal: Decimal = row.get(3);
+        let total_commission: f64 = commission_decimal.to_string().parse().unwrap_or(0.0);
+        let active_employees: i64 = row.get(4);
+        
+        monthly_performance.push(MonthlyEmployeePerformance {
+            month,
+            total_sales: total_sales as i32,
+            total_revenue,
+            total_commission,
+            active_employees: active_employees as i32,
+        });
+    }
+    
+    // Get all employees with their performance metrics
+    let employee_rows = client
+        .query("
+            SELECT 
+                e.employee_id,
+                e.first_name || ' ' || e.last_name as employee_name,
+                e.email,
+                e.role,
+                e.hire_date,
+                e.commission_rate,
+                e.is_active,
+                COUNT(s.sale_id) as total_sales,
+                COALESCE(SUM(s.sale_price), 0) as total_revenue,
+                CURRENT_DATE - e.hire_date as days_employed
+            FROM employees e
+            LEFT JOIN sales s ON e.employee_id = s.salesperson_id
+            GROUP BY e.employee_id, e.first_name, e.last_name, e.email, e.role, e.hire_date, e.commission_rate, e.is_active
+            ORDER BY total_revenue DESC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Employee list error: {}", e)))?;
+    
+    let mut employee_list = Vec::new();
+    for row in employee_rows {
+        let employee_id: i32 = row.get(0);
+        let employee_name: String = row.get(1);
+        let email: String = row.get(2);
+        let role: String = row.get(3);
+        let hire_date: chrono::NaiveDate = row.get(4);
+        let rate_decimal: Decimal = row.get(5);
+        let commission_rate: f64 = rate_decimal.to_string().parse().unwrap_or(0.0);
+        let is_active: bool = row.get(6);
+        let total_sales: i64 = row.get(7);
+        let revenue_decimal: Decimal = row.get(8);
+        let total_revenue: f64 = revenue_decimal.to_string().parse().unwrap_or(0.0);
+        let days_employed: i32 = row.get(9);
+        
+        employee_list.push(EmployeeDetail {
+            employee_id,
+            employee_name,
+            email,
+            role,
+            hire_date: hire_date.to_string(),
+            commission_rate,
+            is_active,
+            total_sales: total_sales as i32,
+            total_revenue,
+            days_employed,
+        });
+    }
+    
+    Ok(Json(EmployeePerformance {
+        total_employees,
+        active_employees,
+        total_commission_paid,
+        average_commission_rate,
+        top_performers,
+        performance_by_role,
+        monthly_performance,
+        employee_list,
+    }))
+}
+
 // Health check endpoint
 async fn health_check() -> &'static str {
     "OK"
@@ -1679,5 +1966,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/api/dashboard/finance", get(get_finance_overview))
         .route("/api/dashboard/customers", get(get_customer_analytics))
         .route("/api/dashboard/maintenance", get(get_maintenance_analytics))
+        .route("/api/dashboard/employees", get(get_employee_performance))
         .with_state(state)
 }
