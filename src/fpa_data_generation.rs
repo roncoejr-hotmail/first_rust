@@ -323,6 +323,16 @@ pub fn generate_forecast_scenarios(client: &mut Client, fiscal_year: i32) -> Res
 pub fn generate_all_fpa_data(client: &mut Client, fiscal_year: i32) -> Result<(), String> {
     println!("Generating FP&A sample data...");
     
+    // Check if FP&A tables exist
+    let table_check = client
+        .query("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'cost_centers')", &[])
+        .map_err(|e| format!("Failed to check for FP&A tables: {}", e))?;
+    
+    let tables_exist: bool = table_check[0].get(0);
+    if !tables_exist {
+        return Err("FP&A tables don't exist! Please run: psql -U your_user -d postgres -f schema/09_create_fpa_tables.sql".to_string());
+    }
+    
     // 1. Cost Centers
     let cc_count = generate_cost_centers(client, 10)?;
     println!("Generated {} cost centers", cc_count);
