@@ -78,8 +78,8 @@ export default function VehicleInventoryTable({ vehicles }: Props) {
               </TableCell>
               <TableCell align="center">
                 <Chip
-                  label={vehicle.status}
-                  color={vehicle.status === 'Available' ? 'success' : 'default'}
+                  label={vehicle.status.charAt(0).toUpperCase() + vehicle.status.slice(1)}
+                  color={vehicle.status === 'available' ? 'success' : 'default'}
                   size="small"
                   sx={{ fontWeight: 'medium' }}
                 />

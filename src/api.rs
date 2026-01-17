@@ -547,9 +547,9 @@ async fn get_inventory_overview(
         .query_one("
             SELECT 
                 COUNT(*) as total,
-                SUM(CASE WHEN status = 'Available' THEN 1 ELSE 0 END) as available,
-                SUM(CASE WHEN status = 'Sold' THEN 1 ELSE 0 END) as sold,
-                COALESCE(SUM(CASE WHEN status = 'Available' THEN cost_price ELSE 0 END), 0) as inventory_value
+                SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) as available,
+                SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) as sold,
+                COALESCE(SUM(CASE WHEN status = 'available' THEN cost_price ELSE 0 END), 0) as inventory_value
             FROM vehicles
         ", &[])
         .await
@@ -567,7 +567,7 @@ async fn get_inventory_overview(
             SELECT COALESCE(AVG(s.sale_date - v.date_acquired), 0) as avg_days
             FROM vehicles v
             JOIN sales s ON v.vehicle_id = s.vehicle_id
-            WHERE v.status = 'Sold'
+            WHERE v.status = 'sold'
         ", &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
@@ -580,10 +580,10 @@ async fn get_inventory_overview(
         .query("
             SELECT 
                 vehicle_type,
-                SUM(CASE WHEN status = 'Available' THEN 1 ELSE 0 END) as available,
-                SUM(CASE WHEN status = 'Sold' THEN 1 ELSE 0 END) as sold,
+                SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) as available,
+                SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) as sold,
                 COUNT(*) as total,
-                COALESCE(SUM(CASE WHEN status = 'Available' THEN cost_price ELSE 0 END), 0) as total_value
+                COALESCE(SUM(CASE WHEN status = 'available' THEN cost_price ELSE 0 END), 0) as total_value
             FROM vehicles
             GROUP BY vehicle_type
             ORDER BY total DESC
@@ -620,7 +620,7 @@ async fn get_inventory_overview(
                 COUNT(*) as count
             FROM vehicles v
             JOIN sales s ON v.vehicle_id = s.vehicle_id
-            WHERE v.status = 'Sold'
+            WHERE v.status = 'sold'
             GROUP BY v.vehicle_type
             ORDER BY count DESC
         ", &[])
@@ -662,7 +662,9 @@ async fn get_inventory_overview(
                 status,
                 CURRENT_DATE - date_acquired as days_in_inventory
             FROM vehicles
-            ORDER BY status DESC, date_acquired DESC
+            ORDER BY 
+                CASE WHEN status = 'available' THEN 0 ELSE 1 END,
+                date_acquired DESC
             LIMIT 20
         ", &[])
         .await
