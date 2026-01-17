@@ -1088,7 +1088,7 @@ async fn get_customer_analytics(
             ) s ON c.customer_id = s.customer_id
         ", &[])
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Customer stats query error: {}", e)))?;
     
     let total_customers: i64 = customer_stats.get(0);
     let active_customers: i64 = customer_stats.get(1);
@@ -1109,7 +1109,7 @@ async fn get_customer_analytics(
             ) customer_totals
         ", &[])
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("CLV query error: {}", e)))?;
     
     let clv_decimal: Decimal = clv_row.get(0);
     let total_customer_lifetime_value: f64 = clv_decimal.to_string().parse().unwrap_or(0.0);
@@ -1132,7 +1132,7 @@ async fn get_customer_analytics(
             LIMIT 15
         ", &[])
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("State distribution query error: {}", e)))?;
     
     let mut customers_by_state = Vec::new();
     for row in state_rows {
@@ -1172,7 +1172,7 @@ async fn get_customer_analytics(
             ORDER BY MIN(c.credit_score) DESC
         ", &[])
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Credit score query error: {}", e)))?;
     
     let mut credit_score_distribution = Vec::new();
     for row in credit_rows {
@@ -1211,7 +1211,7 @@ async fn get_customer_analytics(
             LIMIT 10
         ", &[])
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Top customers query error: {}", e)))?;
     
     let mut top_customers = Vec::new();
     for row in top_customer_rows {
@@ -1255,7 +1255,7 @@ async fn get_customer_analytics(
             LIMIT 12
         ", &[])
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Acquisition trend query error: {}", e)))?;
     
     let mut customer_acquisition_trend = Vec::new();
     for row in acquisition_rows {
@@ -1307,7 +1307,7 @@ async fn get_customer_analytics(
             ORDER BY min_age
         ", &[])
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Age demographics query error: {}", e)))?;
     
     let mut age_demographics = Vec::new();
     for row in age_rows {
