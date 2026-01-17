@@ -863,6 +863,53 @@ pub struct KPITrend {
     pub achievement: f64,
 }
 
+// Scenario Planning Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ScenarioPlanningOverview {
+    pub fiscal_year: i32,
+    pub scenarios: Vec<ScenarioSummary>,
+    pub scenario_comparison: Vec<ScenarioComparison>,
+    pub monthly_comparison: Vec<MonthlyScenarioData>,
+    pub category_breakdown: Vec<CategoryScenarioBreakdown>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ScenarioSummary {
+    pub scenario_id: i32,
+    pub scenario_name: String,
+    pub scenario_type: String,
+    pub description: String,
+    pub total_revenue: f64,
+    pub total_expenses: f64,
+    pub net_income: f64,
+    pub profit_margin: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ScenarioComparison {
+    pub metric: String,
+    pub best_case: f64,
+    pub most_likely: f64,
+    pub worst_case: f64,
+    pub variance_best_to_worst: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MonthlyScenarioData {
+    pub period: String,
+    pub best_case: f64,
+    pub most_likely: f64,
+    pub worst_case: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CategoryScenarioBreakdown {
+    pub category: String,
+    pub best_case: f64,
+    pub most_likely: f64,
+    pub worst_case: f64,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -2637,6 +2684,217 @@ async fn get_financial_forecast(
     }))
 }
 
+// Handler for scenario planning dashboard
+async fn get_scenario_planning(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ScenarioPlanningOverview>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    let fiscal_year = 2023;
+    
+    // Get all scenarios for the fiscal year
+    let scenario_rows = client
+        .query("
+            SELECT scenario_id, scenario_name, scenario_type, description
+            FROM forecast_scenarios
+            WHERE fiscal_year = $1
+            ORDER BY 
+                CASE scenario_type
+                    WHEN 'best_case' THEN 1
+                    WHEN 'most_likely' THEN 2
+                    WHEN 'worst_case' THEN 3
+                    ELSE 4
+                END
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Scenarios error: {:?}", e)))?;
+    
+    let mut scenarios = Vec::new();
+    let mut scenario_ids = Vec::new();
+    
+    for row in scenario_rows {
+        let scenario_id: i32 = row.get(0);
+        let scenario_name: String = row.get(1);
+        let scenario_type: String = row.get(2);
+        let description: String = row.get(3);
+        
+        scenario_ids.push(scenario_id);
+        
+        // Get totals for this scenario
+        let totals = client
+            .query_one("
+                SELECT 
+                    COALESCE(SUM(CASE WHEN category = 'revenue' THEN forecasted_amount ELSE 0 END), 0) as total_revenue,
+                    COALESCE(SUM(CASE WHEN category != 'revenue' THEN forecasted_amount ELSE 0 END), 0) as total_expenses
+                FROM forecast_data
+                WHERE scenario_id = $1
+            ", &[&scenario_id])
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Totals error: {:?}", e)))?;
+        
+        let revenue_dec: Decimal = totals.get(0);
+        let total_revenue: f64 = revenue_dec.to_string().parse().unwrap_or(0.0);
+        let expenses_dec: Decimal = totals.get(1);
+        let total_expenses: f64 = expenses_dec.to_string().parse().unwrap_or(0.0);
+        let net_income = total_revenue - total_expenses;
+        let profit_margin = if total_revenue > 0.0 {
+            (net_income / total_revenue) * 100.0
+        } else {
+            0.0
+        };
+        
+        scenarios.push(ScenarioSummary {
+            scenario_id,
+            scenario_name,
+            scenario_type,
+            description,
+            total_revenue,
+            total_expenses,
+            net_income,
+            profit_margin,
+        });
+    }
+    
+    // Build scenario comparison for key metrics
+    let mut scenario_comparison = Vec::new();
+    
+    if scenarios.len() >= 3 {
+        let best = &scenarios[0];
+        let likely = &scenarios[1];
+        let worst = &scenarios[2];
+        
+        scenario_comparison.push(ScenarioComparison {
+            metric: "Total Revenue".to_string(),
+            best_case: best.total_revenue,
+            most_likely: likely.total_revenue,
+            worst_case: worst.total_revenue,
+            variance_best_to_worst: best.total_revenue - worst.total_revenue,
+        });
+        
+        scenario_comparison.push(ScenarioComparison {
+            metric: "Total Expenses".to_string(),
+            best_case: best.total_expenses,
+            most_likely: likely.total_expenses,
+            worst_case: worst.total_expenses,
+            variance_best_to_worst: worst.total_expenses - best.total_expenses,
+        });
+        
+        scenario_comparison.push(ScenarioComparison {
+            metric: "Net Income".to_string(),
+            best_case: best.net_income,
+            most_likely: likely.net_income,
+            worst_case: worst.net_income,
+            variance_best_to_worst: best.net_income - worst.net_income,
+        });
+        
+        scenario_comparison.push(ScenarioComparison {
+            metric: "Profit Margin %".to_string(),
+            best_case: best.profit_margin,
+            most_likely: likely.profit_margin,
+            worst_case: worst.profit_margin,
+            variance_best_to_worst: best.profit_margin - worst.profit_margin,
+        });
+    }
+    
+    // Monthly comparison
+    let monthly_rows = client
+        .query("
+            SELECT 
+                TO_CHAR(fd.period_start, 'YYYY-MM') as period,
+                fs.scenario_type,
+                COALESCE(SUM(CASE WHEN fd.category = 'revenue' THEN fd.forecasted_amount ELSE -fd.forecasted_amount END), 0) as net_amount
+            FROM forecast_data fd
+            JOIN forecast_scenarios fs ON fd.scenario_id = fs.scenario_id
+            WHERE fs.fiscal_year = $1
+            GROUP BY fd.period_start, fs.scenario_type
+            ORDER BY fd.period_start, fs.scenario_type
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Monthly error: {:?}", e)))?;
+    
+    let mut monthly_map: std::collections::HashMap<String, (f64, f64, f64)> = std::collections::HashMap::new();
+    
+    for row in monthly_rows {
+        let period: String = row.get(0);
+        let scenario_type: String = row.get(1);
+        let amount_dec: Decimal = row.get(2);
+        let amount: f64 = amount_dec.to_string().parse().unwrap_or(0.0);
+        
+        let entry = monthly_map.entry(period).or_insert((0.0, 0.0, 0.0));
+        match scenario_type.as_str() {
+            "best_case" => entry.0 = amount,
+            "most_likely" => entry.1 = amount,
+            "worst_case" => entry.2 = amount,
+            _ => {}
+        }
+    }
+    
+    let mut monthly_comparison: Vec<MonthlyScenarioData> = monthly_map
+        .into_iter()
+        .map(|(period, (best, likely, worst))| MonthlyScenarioData {
+            period,
+            best_case: best,
+            most_likely: likely,
+            worst_case: worst,
+        })
+        .collect();
+    
+    monthly_comparison.sort_by(|a, b| a.period.cmp(&b.period));
+    
+    // Category breakdown
+    let category_rows = client
+        .query("
+            SELECT 
+                fd.category,
+                fs.scenario_type,
+                COALESCE(SUM(fd.forecasted_amount), 0) as total
+            FROM forecast_data fd
+            JOIN forecast_scenarios fs ON fd.scenario_id = fs.scenario_id
+            WHERE fs.fiscal_year = $1
+            GROUP BY fd.category, fs.scenario_type
+            ORDER BY fd.category, fs.scenario_type
+        ", &[&fiscal_year])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Category error: {:?}", e)))?;
+    
+    let mut category_map: std::collections::HashMap<String, (f64, f64, f64)> = std::collections::HashMap::new();
+    
+    for row in category_rows {
+        let category: String = row.get(0);
+        let scenario_type: String = row.get(1);
+        let amount_dec: Decimal = row.get(2);
+        let amount: f64 = amount_dec.to_string().parse().unwrap_or(0.0);
+        
+        let entry = category_map.entry(category).or_insert((0.0, 0.0, 0.0));
+        match scenario_type.as_str() {
+            "best_case" => entry.0 = amount,
+            "most_likely" => entry.1 = amount,
+            "worst_case" => entry.2 = amount,
+            _ => {}
+        }
+    }
+    
+    let category_breakdown: Vec<CategoryScenarioBreakdown> = category_map
+        .into_iter()
+        .map(|(category, (best, likely, worst))| CategoryScenarioBreakdown {
+            category,
+            best_case: best,
+            most_likely: likely,
+            worst_case: worst,
+        })
+        .collect();
+    
+    Ok(Json(ScenarioPlanningOverview {
+        fiscal_year,
+        scenarios,
+        scenario_comparison,
+        monthly_comparison,
+        category_breakdown,
+    }))
+}
+
 // Handler for KPI scorecard dashboard
 async fn get_kpi_scorecard(
     State(state): State<Arc<AppState>>,
@@ -3459,5 +3717,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/api/fpa/budget-management", get(get_budget_management))
         .route("/api/fpa/variance-analysis", get(get_variance_analysis))
         .route("/api/fpa/kpi-scorecard", get(get_kpi_scorecard))
+        .route("/api/fpa/scenario-planning", get(get_scenario_planning))
         .with_state(state)
 }
