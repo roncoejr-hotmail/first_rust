@@ -2656,7 +2656,9 @@ async fn get_kpi_scorecard(
                 kd.unit,
                 kd.frequency,
                 kd.target_value,
-                kd.is_higher_better
+                kd.threshold_green,
+                kd.threshold_yellow,
+                kd.threshold_red
             FROM kpi_definitions kd
             WHERE kd.is_active = true
             ORDER BY kd.category, kd.kpi_name
@@ -2680,7 +2682,12 @@ async fn get_kpi_scorecard(
         let frequency: String = row.get(5);
         let target_decimal: Decimal = row.get(6);
         let target_value: f64 = target_decimal.to_string().parse().unwrap_or(0.0);
-        let is_higher_better: bool = row.get(7);
+        let green_decimal: Decimal = row.get(7);
+        let threshold_green: f64 = green_decimal.to_string().parse().unwrap_or(0.0);
+        let yellow_decimal: Decimal = row.get(8);
+        let threshold_yellow: f64 = yellow_decimal.to_string().parse().unwrap_or(0.0);
+        let red_decimal: Decimal = row.get(9);
+        let threshold_red: f64 = red_decimal.to_string().parse().unwrap_or(0.0);
         
         // Get most recent actual value for this KPI (may not exist yet)
         let current_value = match client
@@ -2707,20 +2714,25 @@ async fn get_kpi_scorecard(
             0.0
         };
         
-        // Determine status based on achievement and direction
+        // Determine status based on thresholds
+        // If green > yellow > red, then higher is better
+        // If red > yellow > green, then lower is better
+        let is_higher_better = threshold_green >= threshold_yellow;
+        
         let status = if is_higher_better {
-            if achievement_percentage >= 90.0 {
+            // Higher is better (e.g., revenue, sales)
+            if current_value >= threshold_green {
                 "on-track"
-            } else if achievement_percentage >= 75.0 {
+            } else if current_value >= threshold_yellow {
                 "at-risk"
             } else {
                 "off-track"
             }
         } else {
-            // Lower is better (e.g., cost, defect rate)
-            if achievement_percentage <= 110.0 {
+            // Lower is better (e.g., costs, days in inventory)
+            if current_value <= threshold_green {
                 "on-track"
-            } else if achievement_percentage <= 125.0 {
+            } else if current_value <= threshold_yellow {
                 "at-risk"
             } else {
                 "off-track"
