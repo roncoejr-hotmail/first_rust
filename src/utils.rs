@@ -205,6 +205,7 @@ pub fn open_postgres_db(db_name: &str) -> postgres::Client {
     //
     //
     let tls = native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(true)
         .build()
         .expect("Failed to create TLS connector");
     let connector = postgres_native_tls::MakeTlsConnector::new(tls);
