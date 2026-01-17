@@ -469,9 +469,9 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         let description_slice = description.as_str();
         
         client.execute(query, &[
-            vin_slice, make_slice, model_slice, &year, color_slice, &mileage, 
-            condition_slice, vehicle_type_slice, &cost_price, &list_price, 
-            status_slice, date_acquired_slice, description_slice
+            &vin_slice, &make_slice, &model_slice, &year, &color_slice, &mileage,
+            &condition_slice, &vehicle_type_slice, &cost_price, &list_price,
+            &status_slice, &date_acquired_slice, &description_slice
         ]).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}'): {}", vin, vehicle_type, e))?;
         
         inserted += 1;
@@ -535,9 +535,9 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
         let date_of_birth_slice = date_of_birth.as_str();
         
         client.execute(query, &[
-            first_name_slice, last_name_slice, email_slice, phone_slice, 
-            address_slice, city_slice, state_slice, zip_code_slice,
-            date_of_birth_slice, &credit_score
+            &first_name_slice, &last_name_slice, &email_slice, &phone_slice,
+            &address_slice, &city_slice, &state_slice, &zip_code_slice,
+            &date_of_birth_slice, &credit_score
         ]).map_err(|e| format!("Failed to insert customer (zip_code='{}', state='{}'): {}", zip_code, state, e))?;
         
         inserted += 1;
@@ -593,8 +593,8 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         let hire_date_slice = hire_date.as_str();
         
         client.execute(query, &[
-            first_name_slice, last_name_slice, email_slice, phone_slice, 
-            role_slice, hire_date_slice, &commission_rate, &is_active
+            &first_name_slice, &last_name_slice, &email_slice, &phone_slice,
+            &role_slice, &hire_date_slice, &commission_rate, &is_active
         ]).map_err(|e| format!("Failed to insert employee (role='{}'): {}", role, e))?;
         
         inserted += 1;
