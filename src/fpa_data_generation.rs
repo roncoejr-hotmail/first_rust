@@ -538,11 +538,11 @@ pub fn generate_rolling_forecasts(client: &mut Client) -> Result<usize, String> 
                             &category,
                             &department,
                             &forecast_dec,
-                            &actual_ref,
-                            &variance_ref,
-                            &variance_pct_ref,
+                            &actual_ref as &(dyn postgres::types::ToSql + Sync),
+                            &variance_ref as &(dyn postgres::types::ToSql + Sync),
+                            &variance_pct_ref as &(dyn postgres::types::ToSql + Sync),
                             &forecast_created,
-                            &actual_date_ref,
+                            &actual_date_ref as &(dyn postgres::types::ToSql + Sync),
                         ],
                     )
                     .map_err(|e| format!("Failed to insert rolling forecast for {} {}: {}", category, period_start, e))?;
