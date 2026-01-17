@@ -717,8 +717,8 @@ pub fn generate_sample_loans(client: &mut postgres::Client) -> Result<usize, Str
     let mut inserted = 0;
     let query = "INSERT INTO loans (sale_id, loan_amount, interest_rate, term_months, monthly_payment, loan_start_date, loan_status, remaining_balance) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)";
     
-    // Get sales that are financed (not cash)
-    let sales_rows = client.query("SELECT sale_id, sale_price, down_payment, sale_date FROM sales WHERE payment_method IN ('Finance', 'Lease')", &[])
+    // Get sales that are financed (not cash) and don't already have loans
+    let sales_rows = client.query("SELECT DISTINCT s.sale_id, s.sale_price, s.down_payment, s.sale_date FROM sales s WHERE s.payment_method IN ('Finance', 'Lease') AND NOT EXISTS (SELECT 1 FROM loans l WHERE l.sale_id = s.sale_id)", &[])
         .map_err(|e| format!("Failed to get sales: {}", e))?;
     
     for row in sales_rows {
