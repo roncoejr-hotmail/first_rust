@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use fake::{Fake, Faker};
 use rust_decimal::Decimal;
 use std::str::FromStr;
+use chrono::NaiveDate;
 
 
 //
@@ -450,7 +451,7 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         let acquired_year: i32 = (2020..2024).fake::<i32>();
         let acquired_month: i32 = (1..13).fake::<i32>();
         let acquired_day: i32 = if acquired_month == 2 { (1..29).fake::<i32>() } else if acquired_month == 4 || acquired_month == 6 || acquired_month == 9 || acquired_month == 11 { (1..31).fake::<i32>() } else { (1..32).fake::<i32>() };
-        let date_acquired: String = format!("{}-{:02}-{:02}", acquired_year, acquired_month, acquired_day);
+        let date_acquired = NaiveDate::from_ymd_opt(acquired_year, acquired_month as u32, acquired_day as u32).unwrap();
         let description: String = format!("Vehicle description {}", Faker.fake::<String>());
         
         // Convert DECIMAL values to strings for PostgreSQL
@@ -481,13 +482,12 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         let condition_str: &str = &condition;
         let vehicle_type_str: &str = &vehicle_type;
         let status_str: &str = &status;
-        let date_acquired_str: &str = &date_acquired;
         let description_str: &str = &description;
         
         let result = client.query(query, &[
             &vin_str, &make_str, &model_str, &year, &color_str, &mileage,
             &condition_str, &vehicle_type_str, &cost_price_decimal, &list_price_decimal,
-            &status_str, &date_acquired_str, &description_str
+            &status_str, &date_acquired, &description_str
         ]);
         
         match result {
@@ -538,7 +538,7 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
         let birth_year: i32 = (1950..2000).fake::<i32>();
         let birth_month: i32 = (1..13).fake::<i32>();
         let birth_day: i32 = if birth_month == 2 { (1..29).fake::<i32>() } else if birth_month == 4 || birth_month == 6 || birth_month == 9 || birth_month == 11 { (1..31).fake::<i32>() } else { (1..32).fake::<i32>() };
-        let date_of_birth: String = format!("{}-{:02}-{:02}", birth_year, birth_month, birth_day);
+        let date_of_birth = NaiveDate::from_ymd_opt(birth_year, birth_month as u32, birth_day as u32).unwrap();
         let credit_score: i32 = (300..850).fake::<i32>();
         
         // Debug: print values to identify the issue
@@ -556,12 +556,11 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
         let city_str: &str = &city;
         let state_str: &str = &state;
         let zip_code_str: &str = &zip_code;
-        let date_of_birth_str: &str = &date_of_birth;
         
         client.execute(query, &[
             &first_name_str, &last_name_str, &email_str, &phone_str,
             &address_str, &city_str, &state_str, &zip_code_str,
-            &date_of_birth_str, &credit_score
+            &date_of_birth, &credit_score
         ]).map_err(|e| format!("Failed to insert customer (zip_code='{}', state='{}'): {}", zip_code, state, e))?;
         
         inserted += 1;
@@ -594,7 +593,10 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         let phone: String = format!("{}-{}-{}", (100..1000).fake::<i32>(), (100..1000).fake::<i32>(), (1000..10000).fake::<i32>());
         let role_idx: usize = (0..roles.len()).fake::<usize>();
         let role: String = roles[role_idx].to_string();
-        let hire_date: String = format!("{}-{:02}-{:02}", (2015..2024).fake::<i32>(), (1..13).fake::<i32>(), (1..29).fake::<i32>());
+        let hire_year: i32 = (2015..2024).fake::<i32>();
+        let hire_month: i32 = (1..13).fake::<i32>();
+        let hire_day: i32 = (1..29).fake::<i32>();
+        let hire_date = NaiveDate::from_ymd_opt(hire_year, hire_month as u32, hire_day as u32).unwrap();
         let commission_rate: f64 = match role.as_str() {
             "Salesperson" => (2.0..5.0).fake::<f64>(),
             "Finance Manager" => (1.0..3.0).fake::<f64>(),
@@ -617,11 +619,10 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         let email_str: &str = &email;
         let phone_str: &str = &phone;
         let role_str: &str = &role;
-        let hire_date_str: &str = &hire_date;
         
         client.execute(query, &[
             &first_name_str, &last_name_str, &email_str, &phone_str,
-            &role_str, &hire_date_str, &commission_rate_decimal, &is_active
+            &role_str, &hire_date, &commission_rate_decimal, &is_active
         ]).map_err(|e| format!("Failed to insert employee (role='{}'): {}", role, e))?;
         
         inserted += 1;
