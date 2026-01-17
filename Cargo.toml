@@ -9,13 +9,13 @@ sqlite = "0.37"
 postgres = { version = "0.19", features = ["with-chrono-0_4"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
 postgres-native-tls = "0.5"
-tokio-postgres-native-tls = "0.1"
 native-tls = "0.2"
 fake = { version = "2.8", default-features = false, features = ["derive"] }
 rust_decimal = { version = "1.33", features = ["db-postgres", "db-tokio-postgres"] }
 chrono = { version = "0.4", features = ["serde"] }
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
+tokio-native-tls = "0.3"
 tower-http = { version = "0.5", features = ["cors"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
