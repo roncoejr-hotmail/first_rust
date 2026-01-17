@@ -1078,7 +1078,7 @@ async fn get_customer_analytics(
             SELECT 
                 COUNT(*) as total_customers,
                 COUNT(DISTINCT CASE WHEN s.customer_id IS NOT NULL THEN c.customer_id END) as active_customers,
-                COUNT(DISTINCT CASE WHEN purchase_count > 1 THEN c.customer_id END) as repeat_customers,
+                COUNT(DISTINCT CASE WHEN s.purchase_count > 1 THEN c.customer_id END) as repeat_customers,
                 COALESCE(AVG(c.credit_score), 0) as avg_credit_score
             FROM customers c
             LEFT JOIN (
@@ -1276,27 +1276,35 @@ async fn get_customer_analytics(
     let age_rows = client
         .query("
             SELECT 
-                CASE 
-                    WHEN age < 25 THEN '18-24'
-                    WHEN age < 35 THEN '25-34'
-                    WHEN age < 45 THEN '35-44'
-                    WHEN age < 55 THEN '45-54'
-                    WHEN age < 65 THEN '55-64'
-                    ELSE '65+'
-                END as age_range,
-                COUNT(*) as count,
-                (COUNT(*)::float / (SELECT COUNT(*) FROM customers WHERE date_of_birth IS NOT NULL)::float * 100) as percentage,
-                COALESCE(AVG(credit_score), 0) as avg_credit_score
+                age_range,
+                count,
+                percentage,
+                avg_credit_score
             FROM (
                 SELECT 
-                    customer_id,
-                    credit_score,
-                    EXTRACT(YEAR FROM AGE(CURRENT_DATE, date_of_birth)) as age
-                FROM customers
-                WHERE date_of_birth IS NOT NULL
-            ) age_calc
-            GROUP BY age_range
-            ORDER BY MIN(age)
+                    CASE 
+                        WHEN age < 25 THEN '18-24'
+                        WHEN age < 35 THEN '25-34'
+                        WHEN age < 45 THEN '35-44'
+                        WHEN age < 55 THEN '45-54'
+                        WHEN age < 65 THEN '55-64'
+                        ELSE '65+'
+                    END as age_range,
+                    MIN(age) as min_age,
+                    COUNT(*) as count,
+                    (COUNT(*)::float / (SELECT COUNT(*) FROM customers WHERE date_of_birth IS NOT NULL)::float * 100) as percentage,
+                    COALESCE(AVG(credit_score), 0) as avg_credit_score
+                FROM (
+                    SELECT 
+                        customer_id,
+                        credit_score,
+                        EXTRACT(YEAR FROM AGE(CURRENT_DATE, date_of_birth)) as age
+                    FROM customers
+                    WHERE date_of_birth IS NOT NULL
+                ) age_calc
+                GROUP BY age_range
+            ) age_groups
+            ORDER BY min_age
         ", &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
