@@ -2,8 +2,10 @@ import { ThemeProvider, createTheme, CssBaseline, AppBar, Toolbar, Typography, B
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
 import ExecutiveDashboard from './pages/ExecutiveDashboard';
 import SalesPerformanceDashboard from './pages/SalesPerformanceDashboard';
+import InventoryDashboard from './pages/InventoryDashboard';
 
 const theme = createTheme({
   palette: {
@@ -52,6 +54,17 @@ function Navigation() {
           >
             Sales Performance
           </Button>
+          <Button
+            color="inherit"
+            component={Link}
+            to="/inventory"
+            startIcon={<DirectionsCarIcon />}
+            sx={{
+              backgroundColor: location.pathname === '/inventory' ? 'rgba(255,255,255,0.2)' : 'transparent',
+            }}
+          >
+            Inventory
+          </Button>
         </Box>
       </Toolbar>
     </AppBar>
@@ -67,6 +80,7 @@ function App() {
         <Routes>
           <Route path="/" element={<ExecutiveDashboard />} />
           <Route path="/sales-performance" element={<SalesPerformanceDashboard />} />
+          <Route path="/inventory" element={<InventoryDashboard />} />
         </Routes>
       </Router>
     </ThemeProvider>

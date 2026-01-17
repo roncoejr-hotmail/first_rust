@@ -294,6 +294,52 @@ pub struct VehicleTypeBreakdown {
     pub average_price: f64,
 }
 
+// Inventory Management Response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InventoryOverview {
+    pub total_vehicles: i64,
+    pub available_vehicles: i64,
+    pub sold_vehicles: i64,
+    pub total_inventory_value: f64,
+    pub average_days_in_inventory: f64,
+    pub vehicles_by_type: Vec<InventoryByType>,
+    pub cost_vs_price_analysis: Vec<CostPriceAnalysis>,
+    pub recent_vehicles: Vec<VehicleDetail>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InventoryByType {
+    pub vehicle_type: String,
+    pub available: i32,
+    pub sold: i32,
+    pub total: i32,
+    pub total_value: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CostPriceAnalysis {
+    pub vehicle_type: String,
+    pub avg_cost: f64,
+    pub avg_sale_price: f64,
+    pub avg_markup_percentage: f64,
+    pub count: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VehicleDetail {
+    pub vehicle_id: i32,
+    pub vin: String,
+    pub make: String,
+    pub model: String,
+    pub year: i32,
+    pub vehicle_type: String,
+    pub color: String,
+    pub mileage: i32,
+    pub cost_price: f64,
+    pub status: String,
+    pub days_in_inventory: i32,
+}
+
 // Handler for sales performance dashboard
 async fn get_sales_performance(
     State(state): State<Arc<AppState>>,
@@ -488,6 +534,181 @@ async fn get_sales_performance(
     }))
 }
 
+// Handler for inventory management
+async fn get_inventory_overview(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<InventoryOverview>, (StatusCode, String)> {
+    let client = get_db_client(&state.db_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    
+    // Get total vehicle counts
+    let counts_row = client
+        .query_one("
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN status = 'Available' THEN 1 ELSE 0 END) as available,
+                SUM(CASE WHEN status = 'Sold' THEN 1 ELSE 0 END) as sold,
+                COALESCE(SUM(CASE WHEN status = 'Available' THEN cost_price ELSE 0 END), 0) as inventory_value
+            FROM vehicles
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let total_vehicles: i64 = counts_row.get(0);
+    let available_vehicles: i64 = counts_row.get(1);
+    let sold_vehicles: i64 = counts_row.get(2);
+    let inventory_value_decimal: Decimal = counts_row.get(3);
+    let total_inventory_value: f64 = inventory_value_decimal.to_string().parse().unwrap_or(0.0);
+    
+    // Get average days in inventory (for sold vehicles)
+    let days_row = client
+        .query_one("
+            SELECT COALESCE(AVG(s.sale_date - v.date_acquired), 0) as avg_days
+            FROM vehicles v
+            JOIN sales s ON v.vehicle_id = s.vehicle_id
+            WHERE v.status = 'Sold'
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let average_days_in_inventory: f64 = days_row.get::<_, Option<f64>>(0).unwrap_or(0.0);
+    
+    // Get vehicles by type
+    let type_rows = client
+        .query("
+            SELECT 
+                vehicle_type,
+                SUM(CASE WHEN status = 'Available' THEN 1 ELSE 0 END) as available,
+                SUM(CASE WHEN status = 'Sold' THEN 1 ELSE 0 END) as sold,
+                COUNT(*) as total,
+                COALESCE(SUM(CASE WHEN status = 'Available' THEN cost_price ELSE 0 END), 0) as total_value
+            FROM vehicles
+            GROUP BY vehicle_type
+            ORDER BY total DESC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut vehicles_by_type = Vec::new();
+    for row in type_rows {
+        let vehicle_type: String = row.get(0);
+        let available: i64 = row.get(1);
+        let sold: i64 = row.get(2);
+        let total: i64 = row.get(3);
+        let value_decimal: Decimal = row.get(4);
+        let total_value: f64 = value_decimal.to_string().parse().unwrap_or(0.0);
+        
+        vehicles_by_type.push(InventoryByType {
+            vehicle_type,
+            available: available as i32,
+            sold: sold as i32,
+            total: total as i32,
+            total_value,
+        });
+    }
+    
+    // Get cost vs price analysis
+    let analysis_rows = client
+        .query("
+            SELECT 
+                v.vehicle_type,
+                AVG(v.cost_price) as avg_cost,
+                AVG(s.sale_price) as avg_sale_price,
+                AVG((s.sale_price - v.cost_price) / v.cost_price * 100) as avg_markup,
+                COUNT(*) as count
+            FROM vehicles v
+            JOIN sales s ON v.vehicle_id = s.vehicle_id
+            WHERE v.status = 'Sold'
+            GROUP BY v.vehicle_type
+            ORDER BY count DESC
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut cost_vs_price_analysis = Vec::new();
+    for row in analysis_rows {
+        let vehicle_type: String = row.get(0);
+        let cost_decimal: Decimal = row.get(1);
+        let avg_cost: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
+        let price_decimal: Decimal = row.get(2);
+        let avg_sale_price: f64 = price_decimal.to_string().parse().unwrap_or(0.0);
+        let avg_markup_percentage: f64 = row.get(3);
+        let count: i64 = row.get(4);
+        
+        cost_vs_price_analysis.push(CostPriceAnalysis {
+            vehicle_type,
+            avg_cost,
+            avg_sale_price,
+            avg_markup_percentage,
+            count: count as i32,
+        });
+    }
+    
+    // Get recent vehicles (last 20 added, showing available first)
+    let vehicle_rows = client
+        .query("
+            SELECT 
+                vehicle_id,
+                vin,
+                make,
+                model,
+                year,
+                vehicle_type,
+                color,
+                mileage,
+                cost_price,
+                status,
+                CURRENT_DATE - date_acquired as days_in_inventory
+            FROM vehicles
+            ORDER BY status DESC, date_acquired DESC
+            LIMIT 20
+        ", &[])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    let mut recent_vehicles = Vec::new();
+    for row in vehicle_rows {
+        let vehicle_id: i32 = row.get(0);
+        let vin: String = row.get(1);
+        let make: String = row.get(2);
+        let model: String = row.get(3);
+        let year: i32 = row.get(4);
+        let vehicle_type: String = row.get(5);
+        let color: String = row.get(6);
+        let mileage: i32 = row.get(7);
+        let cost_decimal: Decimal = row.get(8);
+        let cost_price: f64 = cost_decimal.to_string().parse().unwrap_or(0.0);
+        let status: String = row.get(9);
+        let days_in_inventory: i32 = row.get(10);
+        
+        recent_vehicles.push(VehicleDetail {
+            vehicle_id,
+            vin,
+            make,
+            model,
+            year,
+            vehicle_type,
+            color,
+            mileage,
+            cost_price,
+            status,
+            days_in_inventory,
+        });
+    }
+    
+    Ok(Json(InventoryOverview {
+        total_vehicles,
+        available_vehicles,
+        sold_vehicles,
+        total_inventory_value,
+        average_days_in_inventory,
+        vehicles_by_type,
+        cost_vs_price_analysis,
+        recent_vehicles,
+    }))
+}
+
 // Health check endpoint
 async fn health_check() -> &'static str {
     "OK"
@@ -501,5 +722,6 @@ pub fn create_router(db_name: String) -> Router {
         .route("/health", get(health_check))
         .route("/api/dashboard/executive", get(get_executive_overview))
         .route("/api/dashboard/sales-performance", get(get_sales_performance))
+        .route("/api/dashboard/inventory", get(get_inventory_overview))
         .with_state(state)
 }
