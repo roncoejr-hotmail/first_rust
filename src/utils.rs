@@ -451,11 +451,21 @@ pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> 
         let date_acquired: String = format!("{}-{:02}-{:02}", acquired_year, acquired_month, acquired_day);
         let description: String = format!("Vehicle description {}", Faker.fake::<String>());
         
+        // Convert DECIMAL types to String for PostgreSQL serialization
+        let cost_price_str: String = format!("{:.2}", cost_price);
+        let list_price_str: String = format!("{:.2}", list_price);
+        
+        // Debug: print values to identify the issue
+        if inserted == 0 {
+            eprintln!("DEBUG: vehicle_type = '{}', len = {}", vehicle_type, vehicle_type.len());
+            eprintln!("DEBUG: cost_price = {}, cost_price_str = '{}'", cost_price, cost_price_str);
+        }
+        
         let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
             &vin, &make, &model, &year, &color, &mileage, &condition, &vehicle_type,
-            &cost_price, &list_price, &status, &date_acquired, &description
+            &cost_price_str, &list_price_str, &status, &date_acquired, &description
         ];
-        client.execute(query, params).map_err(|e| format!("Failed to insert vehicle: {}", e))?;
+        client.execute(query, params).map_err(|e| format!("Failed to insert vehicle (vin={}, vehicle_type='{}', cost_price='{}'): {}", vin, vehicle_type, cost_price_str, e))?;
         
         inserted += 1;
     }
@@ -494,11 +504,17 @@ pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) ->
         let date_of_birth: String = format!("{}-{:02}-{:02}", birth_year, birth_month, birth_day);
         let credit_score: i32 = (300..850).fake::<i32>();
         
+        // Debug: print values to identify the issue
+        if inserted == 0 {
+            eprintln!("DEBUG: zip_code = '{}', len = {}", zip_code, zip_code.len());
+            eprintln!("DEBUG: state = '{}', len = {}", state, state.len());
+        }
+        
         let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
             &first_name, &last_name, &email, &phone, &address, &city, &state, &zip_code,
             &date_of_birth, &credit_score
         ];
-        client.execute(query, params).map_err(|e| format!("Failed to insert customer: {}", e))?;
+        client.execute(query, params).map_err(|e| format!("Failed to insert customer (zip_code='{}', state='{}'): {}", zip_code, state, e))?;
         
         inserted += 1;
     }
@@ -538,11 +554,20 @@ pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) ->
         };
         let is_active: bool = true;
         
+        // Convert DECIMAL type to String for PostgreSQL serialization
+        let commission_rate_str: String = format!("{:.2}", commission_rate);
+        
+        // Debug: print values to identify the issue
+        if inserted == 0 {
+            eprintln!("DEBUG: role = '{}', len = {}", role, role.len());
+            eprintln!("DEBUG: commission_rate = {}, commission_rate_str = '{}'", commission_rate, commission_rate_str);
+        }
+        
         let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
             &first_name, &last_name, &email, &phone, &role, &hire_date,
-            &commission_rate, &is_active
+            &commission_rate_str, &is_active
         ];
-        client.execute(query, params).map_err(|e| format!("Failed to insert employee: {}", e))?;
+        client.execute(query, params).map_err(|e| format!("Failed to insert employee (role='{}', commission_rate='{}'): {}", role, commission_rate_str, e))?;
         
         inserted += 1;
     }
