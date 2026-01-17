@@ -520,32 +520,29 @@ pub fn generate_rolling_forecasts(client: &mut Client) -> Result<usize, String> 
                 };
                 
                 // Insert rolling forecast
-                // Convert Option<Decimal> to Option<&Decimal> for PostgreSQL
-                let actual_ref = actual_value.as_ref();
-                let variance_ref = variance.as_ref();
-                let variance_pct_ref = variance_pct.as_ref();
-                let actual_date_ref = actual_recorded_date.as_ref();
-                
-                client
-                    .execute(
-                        "INSERT INTO rolling_forecasts 
-                         (forecast_period, category, department, forecasted_value, 
-                          actual_value, variance, variance_percentage,
-                          forecast_created_date, actual_recorded_date)
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-                        &[
-                            &period_start,
-                            &category,
-                            &department,
-                            &forecast_dec,
-                            &actual_ref as &(dyn postgres::types::ToSql + Sync),
-                            &variance_ref as &(dyn postgres::types::ToSql + Sync),
-                            &variance_pct_ref as &(dyn postgres::types::ToSql + Sync),
-                            &forecast_created,
-                            &actual_date_ref as &(dyn postgres::types::ToSql + Sync),
-                        ],
-                    )
-                    .map_err(|e| format!("Failed to insert rolling forecast for {} {}: {}", category, period_start, e))?;
+                // Match on options to pass the right reference types
+                match (actual_value.as_ref(), variance.as_ref(), variance_pct.as_ref(), actual_recorded_date.as_ref()) {
+                    (Some(act), Some(var), Some(var_pct), Some(act_date)) => {
+                        client.execute(
+                            "INSERT INTO rolling_forecasts 
+                             (forecast_period, category, department, forecasted_value, 
+                              actual_value, variance, variance_percentage,
+                              forecast_created_date, actual_recorded_date)
+                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                            &[&period_start, &category, &department, &forecast_dec, act, var, var_pct, &forecast_created, act_date],
+                        )
+                    },
+                    _ => {
+                        client.execute(
+                            "INSERT INTO rolling_forecasts 
+                             (forecast_period, category, department, forecasted_value, 
+                              actual_value, variance, variance_percentage,
+                              forecast_created_date, actual_recorded_date)
+                             VALUES ($1, $2, $3, $4, NULL, NULL, NULL, $5, NULL)",
+                            &[&period_start, &category, &department, &forecast_dec, &forecast_created],
+                        )
+                    }
+                }.map_err(|e| format!("Failed to insert rolling forecast for {} {}: {}", category, period_start, e))?;
                 
                 inserted += 1;
             }
