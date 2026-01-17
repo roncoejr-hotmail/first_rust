@@ -19,6 +19,10 @@ use utils::open_postgres_db;
 use utils::get_records_postgres;
 use utils::insert_records_sqlite;
 use utils::insert_records_postgres;
+use utils::create_automotive_schema;
+use utils::generate_sample_vehicles;
+use utils::generate_sample_customers;
+use utils::generate_sample_employees;
 // use utils::open_sqlite_db;
 use dotenv::dotenv;
 
@@ -76,6 +80,10 @@ fn main() {
         } else if args[j] == "--populate" {
             do_populate = true;
             println!("{}", args[j]);
+        } else if args[j] == "--create-schema" {
+            // Handled in second pass
+        } else if args[j] == "--generate-sample-data" {
+            // Handled in second pass
         }
         j += 1;
     }
@@ -87,6 +95,35 @@ fn main() {
         //
         //
         let increment = match args[i].as_ref() {
+            "--create-schema" => {
+                    let db = db_name.as_deref().expect("--db-name parameter is required with --create-schema");
+                    let mut pg_client = open_postgres_db(db);
+                    match create_automotive_schema(&mut pg_client) {
+                        Ok(_) => println!("Schema created successfully!"),
+                        Err(e) => eprintln!("Error creating schema: {}", e),
+                    }
+                    1
+                            },
+            "--generate-sample-data" => {
+                    let db = db_name.as_deref().expect("--db-name parameter is required with --generate-sample-data");
+                    let count = populate_count.expect("--count is required when using --generate-sample-data");
+                    let mut pg_client = open_postgres_db(db);
+                    
+                    println!("Generating sample data...");
+                    match generate_sample_vehicles(&mut pg_client, count) {
+                        Ok(n) => println!("Generated {} vehicles", n),
+                        Err(e) => eprintln!("Error generating vehicles: {}", e),
+                    }
+                    match generate_sample_customers(&mut pg_client, count) {
+                        Ok(n) => println!("Generated {} customers", n),
+                        Err(e) => eprintln!("Error generating customers: {}", e),
+                    }
+                    match generate_sample_employees(&mut pg_client, count / 4 + 1) {
+                        Ok(n) => println!("Generated {} employees", n),
+                        Err(e) => eprintln!("Error generating employees: {}", e),
+                    }
+                    1
+                            },
             "--db-file" => {
                     println!("{}: {}", args[i], args[i+1]);
                     my_connection = process_connection("--db-file", &args[i+1]);

@@ -8,6 +8,12 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use fake::{Fake, Faker};
+use fake::faker::automotive::en::*;
+use fake::faker::name::en::*;
+use fake::faker::address::en::*;
+use fake::faker::company::en::*;
+use fake::faker::lorem::en::*;
+use fake::faker::chrono::en::*;
 
 
 //
@@ -368,5 +374,160 @@ pub fn insert_records_postgres(client: &mut postgres::Client, table_name: &str, 
     //
     //
     //
+    Ok(inserted)
+}
+
+//
+//
+//
+//
+//
+pub fn create_automotive_schema(client: &mut postgres::Client) -> Result<(), String> {
+    //
+    //
+    //
+    //
+    let schema_files = [
+        "schema/01_create_vehicles.sql",
+        "schema/02_create_customers.sql",
+        "schema/03_create_employees.sql",
+        "schema/04_create_trade_ins.sql",
+        "schema/05_create_sales.sql",
+        "schema/06_create_loans.sql",
+        "schema/07_create_payments.sql",
+        "schema/08_create_maintenance_history.sql",
+    ];
+    
+    for file_path in &schema_files {
+        let sql = fs::read_to_string(file_path)
+            .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
+        
+        // Execute each statement separately (some files may have multiple statements)
+        for statement in sql.split(';') {
+            let trimmed = statement.trim();
+            if !trimmed.is_empty() && !trimmed.starts_with("--") {
+                client.execute(trimmed, &[])
+                    .map_err(|e| format!("Failed to execute statement from {}: {}", file_path, e))?;
+            }
+        }
+        
+        println!("Executed schema file: {}", file_path);
+    }
+    
+    Ok(())
+}
+
+//
+//
+//
+//
+//
+pub fn generate_sample_vehicles(client: &mut postgres::Client, count: usize) -> Result<usize, String> {
+    //
+    //
+    //
+    //
+    let mut inserted = 0;
+    let query = "INSERT INTO vehicles (vin, make, model, year, color, mileage, condition, vehicle_type, cost_price, list_price, status, date_acquired, description) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)";
+    
+    for _ in 0..count {
+        let vin: String = VIN().fake();
+        let make: String = Make().fake();
+        let model: String = Model().fake();
+        let year: i32 = (2010..2025).fake::<i32>();
+        let color: String = Color().fake();
+        let mileage: i32 = (0..150000).fake::<i32>();
+        let condition = if mileage == 0 { "New" } else if mileage < 50000 { "Certified Pre-owned" } else { "Used" };
+        let vehicle_type: String = VehicleType().fake();
+        let cost_price: f64 = (15000.0..60000.0).fake::<f64>();
+        let list_price = cost_price * 1.15;
+        let status = if (0..2).fake::<i32>() == 0 { "available" } else { "pending" };
+        let date_acquired: String = Date().fake();
+        let description: String = Sentence(5..10).fake();
+        
+        client.execute(query, &[
+            &vin, &make, &model, &year, &color, &mileage, &condition, &vehicle_type,
+            &(cost_price as f32), &(list_price as f32), &status, &date_acquired, &description
+        ]).map_err(|e| format!("Failed to insert vehicle: {}", e))?;
+        
+        inserted += 1;
+    }
+    
+    Ok(inserted)
+}
+
+//
+//
+//
+//
+//
+pub fn generate_sample_customers(client: &mut postgres::Client, count: usize) -> Result<usize, String> {
+    //
+    //
+    //
+    //
+    let mut inserted = 0;
+    let query = "INSERT INTO customers (first_name, last_name, email, phone, address, city, state, zip_code, date_of_birth, credit_score) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)";
+    
+    for _ in 0..count {
+        let first_name: String = FirstName().fake();
+        let last_name: String = LastName().fake();
+        let email: String = FreeEmail().fake();
+        let phone: String = PhoneNumber().fake();
+        let address: String = StreetAddress().fake();
+        let city: String = City().fake();
+        let state: String = StateAbbr().fake();
+        let zip_code: String = ZipCode().fake();
+        let date_of_birth: String = Date().fake();
+        let credit_score: i32 = (300..850).fake::<i32>();
+        
+        client.execute(query, &[
+            &first_name, &last_name, &email, &phone, &address, &city, &state, &zip_code,
+            &date_of_birth, &credit_score
+        ]).map_err(|e| format!("Failed to insert customer: {}", e))?;
+        
+        inserted += 1;
+    }
+    
+    Ok(inserted)
+}
+
+//
+//
+//
+//
+//
+pub fn generate_sample_employees(client: &mut postgres::Client, count: usize) -> Result<usize, String> {
+    //
+    //
+    //
+    //
+    let roles = vec!["Salesperson", "Finance Manager", "Sales Manager", "General Manager"];
+    let mut inserted = 0;
+    let query = "INSERT INTO employees (first_name, last_name, email, phone, role, hire_date, commission_rate, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)";
+    
+    for _ in 0..count {
+        let first_name: String = FirstName().fake();
+        let last_name: String = LastName().fake();
+        let email: String = FreeEmail().fake();
+        let phone: String = PhoneNumber().fake();
+        let role_idx: usize = (0..roles.len()).fake::<usize>();
+        let role = roles[role_idx];
+        let hire_date: String = Date().fake();
+        let commission_rate: f64 = match role {
+            "Salesperson" => (2.0..5.0).fake::<f64>(),
+            "Finance Manager" => (1.0..3.0).fake::<f64>(),
+            _ => 0.0,
+        };
+        let is_active: bool = true;
+        
+        client.execute(query, &[
+            &first_name, &last_name, &email, &phone, &role, &hire_date,
+            &(commission_rate as f32), &is_active
+        ]).map_err(|e| format!("Failed to insert employee: {}", e))?;
+        
+        inserted += 1;
+    }
+    
     Ok(inserted)
 }
