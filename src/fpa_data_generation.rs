@@ -319,6 +319,94 @@ pub fn generate_forecast_scenarios(client: &mut Client, fiscal_year: i32) -> Res
     Ok(inserted)
 }
 
+pub fn generate_forecast_data(client: &mut Client, fiscal_year: i32) -> Result<usize, String> {
+    use rand::Rng;
+    
+    // Get all scenarios for this fiscal year
+    let scenarios = client
+        .query("SELECT scenario_id, scenario_type FROM forecast_scenarios WHERE fiscal_year = $1", &[&fiscal_year])
+        .map_err(|e| format!("Failed to query scenarios: {}", e))?;
+    
+    if scenarios.is_empty() {
+        return Err("No forecast scenarios found. Run generate_forecast_scenarios first.".to_string());
+    }
+    
+    // Get budget data as baseline
+    let budget_data = client
+        .query("
+            SELECT 
+                fiscal_month,
+                category,
+                department,
+                COALESCE(SUM(budgeted_amount), 0) as amount
+            FROM budgets
+            WHERE fiscal_year = $1 AND status = 'approved'
+            GROUP BY fiscal_month, category, department
+        ", &[&fiscal_year])
+        .map_err(|e| format!("Failed to query budget data: {}", e))?;
+    
+    let mut rng = rand::thread_rng();
+    let mut inserted = 0;
+    
+    for scenario_row in scenarios {
+        let scenario_id: i32 = scenario_row.get(0);
+        let scenario_type: String = scenario_row.get(1);
+        
+        // Determine adjustment factor based on scenario type
+        let (revenue_factor, expense_factor) = match scenario_type.as_str() {
+            "best_case" => (1.20, 0.95),      // +20% revenue, -5% expenses
+            "most_likely" => (1.10, 1.05),    // +10% revenue, +5% expenses
+            "worst_case" => (0.95, 1.15),     // -5% revenue, +15% expenses
+            _ => (1.0, 1.0),
+        };
+        
+        for budget_row in &budget_data {
+            let fiscal_month: i32 = budget_row.get(0);
+            let category: String = budget_row.get(1);
+            let department: String = budget_row.get(2);
+            let budget_dec: Decimal = budget_row.get(3);
+            let budget_amount: f64 = budget_dec.to_string().parse().unwrap_or(0.0);
+            
+            // Apply adjustment with some random variation
+            let variation = rng.gen_range(0.95..1.05);
+            let factor = if category == "revenue" { revenue_factor } else { expense_factor };
+            let forecasted_amount = budget_amount * factor * variation;
+            
+            let forecast_dec = Decimal::from_str(&format!("{:.2}", forecasted_amount))
+                .map_err(|e| format!("Failed to parse forecast amount: {}", e))?;
+            
+            // Create a forecast date (first day of the month)
+            let forecast_date = chrono::NaiveDate::from_ymd_opt(fiscal_year, fiscal_month as u32, 1)
+                .ok_or_else(|| format!("Invalid date: {}-{}-01", fiscal_year, fiscal_month))?;
+            
+            // Calculate quarter
+            let fiscal_quarter = ((fiscal_month - 1) / 3) + 1;
+            
+            client.execute(
+                "INSERT INTO forecast_data 
+                 (scenario_id, forecast_date, fiscal_year, fiscal_quarter, fiscal_month, 
+                  category, department, forecasted_amount, confidence_level)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                &[
+                    &scenario_id,
+                    &forecast_date,
+                    &fiscal_year,
+                    &fiscal_quarter,
+                    &fiscal_month,
+                    &category,
+                    &department,
+                    &forecast_dec,
+                    &"medium",
+                ],
+            ).map_err(|e| format!("Failed to insert forecast data: {}", e))?;
+            
+            inserted += 1;
+        }
+    }
+    
+    Ok(inserted)
+}
+
 pub fn generate_kpi_actuals(client: &mut Client) -> Result<usize, String> {
     use chrono::Duration;
     use rand::Rng;
@@ -473,6 +561,10 @@ pub fn generate_all_fpa_data(client: &mut Client, fiscal_year: i32) -> Result<()
     // 7. Forecast Scenarios
     let scenario_count = generate_forecast_scenarios(client, fiscal_year)?;
     println!("Generated {} forecast scenarios", scenario_count);
+    
+    // 8. Forecast Data
+    let forecast_data_count = generate_forecast_data(client, fiscal_year)?;
+    println!("Generated {} forecast data records", forecast_data_count);
     
     println!("FP&A data generation complete!");
     
