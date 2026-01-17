@@ -15,7 +15,6 @@ rust_decimal = { version = "1.33", features = ["db-postgres", "db-tokio-postgres
 chrono = { version = "0.4", features = ["serde"] }
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
-tokio-native-tls = "0.3"
 tower-http = { version = "0.5", features = ["cors"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

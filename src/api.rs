@@ -7,8 +7,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio_postgres::NoTls;
-use tokio_native_tls::TlsConnector;
+use postgres_native_tls::MakeTlsConnector;
 use rust_decimal::Decimal;
 
 // Shared application state
@@ -68,7 +67,7 @@ async fn get_db_client(db_name: &str) -> Result<tokio_postgres::Client, String> 
         .build()
         .map_err(|e| format!("TLS error: {}", e))?;
     
-    let connector = TlsConnector::from(tls);
+    let connector = MakeTlsConnector::new(tls);
     
     let (client, connection) = tokio_postgres::connect(&connection_string, connector)
         .await
