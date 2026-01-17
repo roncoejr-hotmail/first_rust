@@ -319,6 +319,109 @@ pub fn generate_forecast_scenarios(client: &mut Client, fiscal_year: i32) -> Res
     Ok(inserted)
 }
 
+pub fn generate_kpi_actuals(client: &mut Client) -> Result<usize, String> {
+    use chrono::Duration;
+    use rand::Rng;
+    
+    // Get all active KPI definitions
+    let kpis = client
+        .query("
+            SELECT kpi_id, kpi_name, target_value, threshold_green, threshold_yellow, threshold_red
+            FROM kpi_definitions
+            WHERE is_active = true
+        ", &[])
+        .map_err(|e| format!("Failed to query KPI definitions: {}", e))?;
+    
+    if kpis.is_empty() {
+        return Err("No KPI definitions found. Run generate_kpi_definitions first.".to_string());
+    }
+    
+    let mut rng = rand::thread_rng();
+    let mut inserted = 0;
+    
+    // Generate 12 months of historical data
+    let today = chrono::Local::now().naive_local().date();
+    
+    for kpi_row in kpis {
+        let kpi_id: i32 = kpi_row.get(0);
+        let kpi_name: String = kpi_row.get(1);
+        let target_decimal: Decimal = kpi_row.get(2);
+        let target: f64 = target_decimal.to_string().parse().unwrap_or(0.0);
+        let green_decimal: Decimal = kpi_row.get(3);
+        let threshold_green: f64 = green_decimal.to_string().parse().unwrap_or(0.0);
+        let yellow_decimal: Decimal = kpi_row.get(4);
+        let threshold_yellow: f64 = yellow_decimal.to_string().parse().unwrap_or(0.0);
+        let red_decimal: Decimal = kpi_row.get(5);
+        let threshold_red: f64 = red_decimal.to_string().parse().unwrap_or(0.0);
+        
+        // Determine if higher is better based on thresholds
+        let is_higher_better = threshold_green >= threshold_yellow;
+        
+        // Generate data for last 12 months
+        for months_ago in (0..12).rev() {
+            let period_date = today - Duration::days((months_ago * 30) as i64);
+            
+            // Create some variation in performance over time
+            let time_factor = 1.0 - (months_ago as f64 * 0.02); // Gradual improvement
+            
+            // Decide performance tier for this KPI
+            let performance_roll: f64 = rng.gen_range(0.0..1.0);
+            
+            let actual_value = if is_higher_better {
+                // Higher is better - generate values around thresholds
+                if performance_roll < 0.5 {
+                    // On track - above green threshold
+                    let range = (threshold_green - threshold_yellow).max(target * 0.1);
+                    threshold_green + rng.gen_range(0.0..range) * time_factor
+                } else if performance_roll < 0.8 {
+                    // At risk - between yellow and green
+                    threshold_yellow + rng.gen_range(0.0..(threshold_green - threshold_yellow))
+                } else {
+                    // Off track - below yellow
+                    threshold_red + rng.gen_range(0.0..(threshold_yellow - threshold_red).max(threshold_yellow * 0.2))
+                }
+            } else {
+                // Lower is better - generate values around thresholds
+                if performance_roll < 0.5 {
+                    // On track - below green threshold
+                    let range = (threshold_yellow - threshold_green).max(target * 0.1);
+                    threshold_green - rng.gen_range(0.0..range) * time_factor
+                } else if performance_roll < 0.8 {
+                    // At risk - between green and yellow
+                    threshold_green + rng.gen_range(0.0..(threshold_yellow - threshold_green))
+                } else {
+                    // Off track - above yellow
+                    threshold_yellow + rng.gen_range(0.0..(threshold_red - threshold_yellow).max(threshold_yellow * 0.2))
+                }
+            };
+            
+            // Ensure non-negative values
+            let actual_value = actual_value.max(0.0);
+            
+            let value_decimal = Decimal::from_str(&format!("{:.2}", actual_value))
+                .map_err(|e| format!("Failed to parse actual value: {}", e))?;
+            
+            // Insert KPI actual
+            client
+                .execute(
+                    "INSERT INTO kpi_actuals (kpi_id, period_date, actual_value, notes, created_date)
+                     VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)",
+                    &[
+                        &kpi_id,
+                        &period_date,
+                        &value_decimal,
+                        &format!("Generated sample data for {}", kpi_name),
+                    ],
+                )
+                .map_err(|e| format!("Failed to insert KPI actual: {}", e))?;
+            
+            inserted += 1;
+        }
+    }
+    
+    Ok(inserted)
+}
+
 /// Generate all FP&A sample data
 pub fn generate_all_fpa_data(client: &mut Client, fiscal_year: i32) -> Result<(), String> {
     println!("Generating FP&A sample data...");
@@ -353,7 +456,11 @@ pub fn generate_all_fpa_data(client: &mut Client, fiscal_year: i32) -> Result<()
     let kpi_count = generate_kpi_definitions(client)?;
     println!("Generated {} KPI definitions", kpi_count);
     
-    // 6. Forecast Scenarios
+    // 6. KPI Actuals (12 months of historical data)
+    let kpi_actual_count = generate_kpi_actuals(client)?;
+    println!("Generated {} KPI actual records", kpi_actual_count);
+    
+    // 7. Forecast Scenarios
     let scenario_count = generate_forecast_scenarios(client, fiscal_year)?;
     println!("Generated {} forecast scenarios", scenario_count);
     
